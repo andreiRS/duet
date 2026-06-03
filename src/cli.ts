@@ -1,5 +1,6 @@
 import * as fs from "fs";
-import { createServer, type ServerHandle } from "./server";
+import { createServer, type ServerHandle, type Scene } from "./server";
+import { watchScene, type WatchHandle } from "./watch";
 
 export const EMPTY_SCENE = {
   type: "excalidraw",
@@ -25,22 +26,40 @@ export interface BootstrapOptions {
   openBrowser?: (url: string) => void;
 }
 
+export interface BootstrapHandle extends ServerHandle {
+  watcher: WatchHandle;
+  close(): Promise<void>;
+}
+
 export function bootstrap({
   filePath,
   port = 3000,
   openBrowser,
-}: BootstrapOptions): ServerHandle {
+}: BootstrapOptions): BootstrapHandle {
   ensureScene(filePath);
   const scene = JSON.parse(fs.readFileSync(filePath, "utf8"));
   const handle = createServer({ port });
   handle.setScene(scene);
+
+  // Watch the served file: on each valid change, push it to all browser tabs.
+  // Malformed/partial reads keep the last good scene (handled inside watchScene).
+  const watcher = watchScene(filePath, {
+    onScene: (parsed) => handle.setScene(parsed as Scene),
+  });
 
   const url = `http://localhost:${handle.server.port}/`;
   if (openBrowser) {
     openBrowser(url);
   }
 
-  return handle;
+  return {
+    ...handle,
+    watcher,
+    close: async () => {
+      await watcher.close();
+      handle.server.stop(true);
+    },
+  };
 }
 
 if (import.meta.main) {
