@@ -36,6 +36,15 @@ export default function App() {
   // the agent's file. This ref makes handleChange ABSORB those onChange(s).
   const isApplyingRemoteRef = useRef(false);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // The server replays the current scene the instant the socket opens, which can
+  // be BEFORE Excalidraw has handed us its API (apiRef is still null). Without
+  // buffering, that first scene is dropped and opening Duet on a non-empty file
+  // shows a blank canvas until the next change. Hold the latest un-applied scene
+  // here and flush it the moment the API is ready.
+  const pendingSceneRef = useRef<unknown>(null);
+  // The first scene we apply is the file's existing content (initial load), not
+  // an agent edit, so it must NOT flash. Only subsequent updates flash.
+  const hasLoadedRef = useRef(false);
 
   function showFlash() {
     setFlashVisible(true);
@@ -43,8 +52,56 @@ export default function App() {
     flashTimer.current = setTimeout(() => setFlashVisible(false), 1500);
   }
 
+  // Apply a scene received over the wire. If Excalidraw's API is not mounted yet,
+  // buffer the scene and return; handleExcalidrawAPI flushes it on ready.
+  function applyScene(rawScene: unknown) {
+    const api = apiRef.current;
+    if (!api) {
+      pendingSceneRef.current = rawScene;
+      return;
+    }
+    const scene = structuredClone(rawScene) as {
+      elements?: unknown[];
+      appState?: Record<string, unknown> | null;
+    };
+    const elements = scene.elements ?? [];
+    // Mark that we are applying a remote scene so the onChange(s) updateScene
+    // fires are absorbed, not bounced back as a "save". updateScene re-stamps
+    // versions, so we cannot rely on the incoming version alone (the post-apply
+    // version is higher); the flag is the robust guard. It is cleared two
+    // animation frames later (below).
+    isApplyingRemoteRef.current = true;
+    api.updateScene({
+      elements,
+      appState: scene.appState ?? null,
+      captureUpdate: CaptureUpdateAction.NEVER,
+    });
+    // Excalidraw fires onChange asynchronously (after its render commit, a frame
+    // or two later), not synchronously inside updateScene. A setTimeout(0) clears
+    // the flag too early and the bounce slips through. Wait two animation frames
+    // so the render and its onChange have fired, then record the ACTUAL
+    // post-apply scene version (it was re-stamped higher) so a later genuine
+    // human edit still advances the gate, and only then stop absorbing.
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        const applied = apiRef.current?.getSceneElements() ?? elements;
+        lastVersionRef.current = getSceneVersion(applied as never);
+        isApplyingRemoteRef.current = false;
+      });
+    });
+    // Flash for genuine agent updates only, never the initial scene load.
+    if (hasLoadedRef.current) showFlash();
+    hasLoadedRef.current = true;
+  }
+
   function handleExcalidrawAPI(api: ExcalidrawAPI) {
     apiRef.current = api;
+    // A scene may have arrived over the wire before the API existed; flush it.
+    if (pendingSceneRef.current != null) {
+      const pending = pendingSceneRef.current;
+      pendingSceneRef.current = null;
+      applyScene(pending);
+    }
   }
 
   // The human edited the canvas. Excalidraw fires onChange for pure noise too
@@ -103,35 +160,7 @@ export default function App() {
       try {
         const msg = JSON.parse(event.data as string);
         if (msg.type === "scene" && msg.scene != null) {
-          const scene = structuredClone(msg.scene);
-          const elements = scene.elements ?? [];
-          // Mark that we are applying a remote scene so the onChange(s)
-          // updateScene fires are absorbed, not bounced back as a "save".
-          // updateScene re-stamps versions, so we cannot rely on the incoming
-          // version alone (the post-apply version is higher); the flag is the
-          // robust guard. It is cleared two animation frames later (below).
-          isApplyingRemoteRef.current = true;
-          apiRef.current?.updateScene({
-            elements,
-            appState: scene.appState ?? null,
-            captureUpdate: CaptureUpdateAction.NEVER,
-          });
-          // Excalidraw fires onChange asynchronously (after its render commit,
-          // a frame or two later), not synchronously inside updateScene. A
-          // setTimeout(0) clears the flag too early and the bounce slips
-          // through. Wait two animation frames so the render and its onChange
-          // have fired, then record the ACTUAL post-apply scene version (it was
-          // re-stamped higher) so a later genuine human edit still advances the
-          // gate, and only then stop absorbing.
-          requestAnimationFrame(() => {
-            requestAnimationFrame(() => {
-              const applied = apiRef.current?.getSceneElements() ?? elements;
-              lastVersionRef.current = getSceneVersion(applied as never);
-              isApplyingRemoteRef.current = false;
-            });
-          });
-          // External update arrived over the wire: flash a transient banner.
-          showFlash();
+          applyScene(msg.scene);
         }
       } catch {
         // Ignore malformed messages
