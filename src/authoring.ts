@@ -130,6 +130,37 @@ export function scene(opts: { dark?: boolean } = {}) {
     );
   };
 
+  // Shared helper: attach a bound label text element to an arrow element.
+  // Mutates arrowEl.boundElements and pushes the text element onto els.
+  const pushArrowLabel = (
+    arrowEl: El,
+    x1: number,
+    y1: number,
+    x2: number,
+    y2: number,
+    label: string,
+    color: string,
+  ) => {
+    const tid = arrowEl.id + "_t";
+    arrowEl.boundElements = [{ type: "text", id: tid }];
+    els.push(arrowEl);
+    els.push(
+      baseText({
+        id: tid,
+        x: x1 + (x2 - x1) / 2 - w(label, 14) / 2,
+        y: y1 + (y2 - y1) / 2 - 10,
+        width: w(label, 14),
+        height: 20,
+        text: label,
+        fontSize: 14,
+        strokeColor: color,
+        textAlign: "center",
+        verticalAlign: "middle",
+        containerId: arrowEl.id,
+      }),
+    );
+  };
+
   // Arrow from (x,y) along point offsets. Optional bound label.
   const arrow = (id: string, x: number, y: number, pts: number[][], color = ink, label?: string) => {
     const width = Math.max(...pts.map((p) => p[0])) - Math.min(...pts.map((p) => p[0]));
@@ -151,24 +182,7 @@ export function scene(opts: { dark?: boolean } = {}) {
       endBinding: null,
     });
     if (label) {
-      const tid = id + "_t";
-      e.boundElements = [{ type: "text", id: tid }];
-      els.push(e);
-      els.push(
-        baseText({
-          id: tid,
-          x: x + width / 2 - w(label, 14) / 2,
-          y: y + height / 2 - 10,
-          width: w(label, 14),
-          height: 20,
-          text: label,
-          fontSize: 14,
-          strokeColor: color,
-          textAlign: "center",
-          verticalAlign: "middle",
-          containerId: id,
-        }),
-      );
+      pushArrowLabel(e, x, x + width, y, y + height, label, color);
     } else {
       els.push(e);
     }
@@ -306,24 +320,7 @@ export function scene(opts: { dark?: boolean } = {}) {
     });
 
     if (opts.label) {
-      const tid = id + "_t";
-      e.boundElements = [{ type: "text", id: tid }];
-      els.push(e);
-      els.push(
-        baseText({
-          id: tid,
-          x: startX + (endX - startX) / 2 - w(opts.label, 14) / 2,
-          y: startY + (endY - startY) / 2 - 10,
-          width: w(opts.label, 14),
-          height: 20,
-          text: opts.label,
-          fontSize: 14,
-          strokeColor: color,
-          textAlign: "center",
-          verticalAlign: "middle",
-          containerId: id,
-        }),
-      );
+      pushArrowLabel(e, startX, startY, endX, endY, opts.label, color);
     } else {
       els.push(e);
     }

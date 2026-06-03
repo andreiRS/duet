@@ -207,3 +207,37 @@ describe("AC4: boxes reference the arrow in their boundElements", () => {
     expect(label!.type).toBe("text");
   });
 });
+
+// AC5: error path — missing box
+describe("AC5: connect() throws when a box id is not found", () => {
+  test("throws when fromBoxId does not exist", () => {
+    const s = scene();
+    s.labeledRect("box_b", 300, 0, 100, 60, green, "B", 14);
+    expect(() => s.connect("arr1", "no_such_box", "box_b")).toThrow(
+      "connect: box not found",
+    );
+  });
+
+  test("throws when toBoxId does not exist", () => {
+    const s = scene();
+    s.labeledRect("box_a", 0, 0, 100, 60, blue, "A", 14);
+    expect(() => s.connect("arr1", "box_a", "no_such_box")).toThrow(
+      "connect: box not found",
+    );
+  });
+});
+
+// AC6: tie-break — dx == dy uses horizontal branch
+describe("AC6: diagonal tie-break (dx == dy) uses horizontal branch", () => {
+  test("equal diagonal offset → start=[1,0.5], end=[0,0.5]", () => {
+    const s = scene();
+    // box_a center at (50, 30), box_b center at (350, 330) → dx=300, dy=300
+    s.labeledRect("box_a", 0, 0, 100, 60, blue, "A", 14);
+    s.labeledRect("box_b", 300, 300, 100, 60, green, "B", 14);
+    s.connect("arr1", "box_a", "box_b");
+    const { elements } = s.build();
+    const arrow = elements.find((e) => e.id === "arr1");
+    expect(arrow!.startBinding.fixedPoint).toEqual([1, 0.5]);
+    expect(arrow!.endBinding.fixedPoint).toEqual([0, 0.5]);
+  });
+});
