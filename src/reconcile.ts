@@ -3,6 +3,16 @@
 // Given a BASELINE scene and a CURRENT scene, classify every element by its
 // stable `id` so the agent can continue editing without clobbering human
 // nudges. Pure, no IO.
+//
+// v1 reconciliation rule (last-writer-wins by convention):
+// - The AGENT's fresh scene decides which elements exist (agent owns structure).
+// - The patch overlays the HUMAN's whitelisted field values for elements present
+//   in BOTH scenes (human nudges/renames survive).
+// - Human-drawn elements (unknown ids) are carried over from the human unchanged.
+// - Human deletions are honored: a deleted id is never resurrected.
+// Consequence: if the agent's fresh scene omits an element the human had merely
+// moved, that human nudge is not re-added. The agent's structural intent wins.
+// This is acceptable for v1.
 
 export type El = Record<string, any>;
 
@@ -34,6 +44,19 @@ export function isHumanId(id: string): boolean {
   return id.length >= HUMAN_ID_MIN_LEN && NANOID_RE.test(id);
 }
 
+// The single source of truth for the whitelisted fields the diff compares and
+// the patch overlays. NEVER includes version/versionNonce. `points` is compared
+// by deep value; all others by strict equality.
+const PATCH_FIELDS = ["x", "y", "width", "height", "text", "points"] as const;
+const DEEP_FIELDS = new Set<string>(["points"]);
+
+function fieldChanged(a: El, b: El, field: string): boolean {
+  if (DEEP_FIELDS.has(field)) {
+    return JSON.stringify(a[field] ?? null) !== JSON.stringify(b[field] ?? null);
+  }
+  return a[field] !== b[field];
+}
+
 export function diffById(
   baseline: { elements?: El[] } | El[],
   current: { elements?: El[] } | El[],
@@ -53,7 +76,7 @@ export function diffById(
       continue;
     }
     if (geometryChanged(b, c)) moved.push(c.id);
-    if (c.text !== b.text) retyped.push(c.id);
+    if (fieldChanged(b, c, "text")) retyped.push(c.id);
   }
 
   const deleted: string[] = [];
@@ -63,9 +86,6 @@ export function diffById(
 
   return { moved, retyped, added, deleted };
 }
-
-// Geometry/text fields the diff and patch operate on. NEVER version/versionNonce.
-const PATCH_FIELDS = ["x", "y", "width", "height", "text", "points"] as const;
 
 // Reconcile the agent's fresh scene with the human's edits, so human nudges
 // survive the next programmatic edit (human edits win over a stale baseline).
@@ -83,7 +103,12 @@ export function applyPatch(
   diff: Diff,
   human: { elements?: El[] } | El[],
 ): El[] {
-  const out = elements(agent).map((e) => ({ ...e }));
+  // Honor human deletions: drop any id the human removed, even if the agent
+  // re-authored it from a stale baseline.
+  const deleted = new Set(diff.deleted);
+  const out = elements(agent)
+    .filter((e) => !deleted.has(e.id))
+    .map((e) => ({ ...e }));
   const outById = new Map(out.map((e) => [e.id, e]));
   const humanById = new Map(elements(human).map((e) => [e.id, e]));
 
@@ -107,16 +132,10 @@ export function applyPatch(
   return out;
 }
 
-function geometryChanged(a: El, b: El): boolean {
-  return (
-    a.x !== b.x ||
-    a.y !== b.y ||
-    a.width !== b.width ||
-    a.height !== b.height ||
-    pointsChanged(a.points, b.points)
-  );
-}
+// Geometry = every whitelisted field except text. Driven by PATCH_FIELDS so the
+// diff and the patch overlay never drift.
+const GEOMETRY_FIELDS = PATCH_FIELDS.filter((f) => f !== "text");
 
-function pointsChanged(a: number[][] | undefined, b: number[][] | undefined): boolean {
-  return JSON.stringify(a ?? null) !== JSON.stringify(b ?? null);
+function geometryChanged(a: El, b: El): boolean {
+  return GEOMETRY_FIELDS.some((f) => fieldChanged(a, b, f));
 }

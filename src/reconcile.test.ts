@@ -161,6 +161,73 @@ test("AC4: a human-drawn element is preserved unchanged after the patch", () => 
   expect(drawn!.y).toBe(300);
 });
 
+// MUST-FIX: a human-deleted element must NOT be resurrected by the patch.
+// The agent re-authors `db` from a stale baseline, but the human deleted it.
+// Human deletion is a human edit; it must survive the next agent edit.
+test("applyPatch does not resurrect a human-deleted element", () => {
+  const baseline = [
+    { id: "api", type: "rectangle", x: 0, y: 0, width: 100, height: 50 },
+    { id: "db", type: "rectangle", x: 200, y: 0, width: 100, height: 50 },
+  ];
+  // human deleted db
+  const human = [{ id: "api", type: "rectangle", x: 0, y: 0, width: 100, height: 50 }];
+  // agent re-authored db from the stale baseline
+  const agent = [
+    { id: "api", type: "rectangle", x: 0, y: 0, width: 100, height: 50 },
+    { id: "db", type: "rectangle", x: 200, y: 0, width: 100, height: 50 },
+  ];
+
+  const reconciled = applyPatch(agent, diffById(baseline, human), human);
+
+  expect(reconciled.find((e) => e.id === "db")).toBeUndefined();
+  expect(reconciled.find((e) => e.id === "api")).toBeDefined();
+});
+
+// An agent-added element with a KNOWN (short, agent-scheme) id is owned by the
+// agent: the patch base is the agent's scene, so the agent's value stands. A
+// human-drawn (unknown id) added element is carried over from the human scene.
+test("applyPatch: agent owns its short-id added elements; human-drawn ones are carried over", () => {
+  const baseline = [{ id: "api", type: "rectangle", x: 0, y: 0, width: 100, height: 50 }];
+  const human = [{ id: "api", type: "rectangle", x: 0, y: 0, width: 100, height: 50 }];
+  // agent added a short-id `db` that the human never saw
+  const agent = [
+    { id: "api", type: "rectangle", x: 0, y: 0, width: 100, height: 50 },
+    { id: "db", type: "rectangle", x: 999, y: 0, width: 100, height: 50 },
+  ];
+
+  const reconciled = applyPatch(agent, diffById(baseline, human), human);
+  const db = reconciled.find((e) => e.id === "db");
+
+  // agent owns its own added short-id element, with the value the agent emitted
+  expect(db).toBeDefined();
+  expect(db!.x).toBe(999);
+});
+
+// diffById must not depend on element array order: shuffling current yields the
+// same classification.
+test("diffById is independent of element order", () => {
+  const baseline = [
+    { id: "api", type: "rectangle", x: 0, y: 0, width: 100, height: 50 },
+    { id: "db", type: "rectangle", x: 200, y: 0, width: 100, height: 50 },
+  ];
+  const ordered = [
+    { id: "api", type: "rectangle", x: 40, y: 0, width: 100, height: 50 },
+    { id: "db", type: "rectangle", x: 200, y: 0, width: 100, height: 50 },
+    { id: "new", type: "rectangle", x: 500, y: 0, width: 100, height: 50 },
+  ];
+  const shuffled = [ordered[2], ordered[0], ordered[1]];
+
+  const a = diffById(baseline, ordered);
+  const b = diffById(baseline, shuffled);
+
+  expect([...b.moved].sort()).toEqual([...a.moved].sort());
+  expect([...b.retyped].sort()).toEqual([...a.retyped].sort());
+  expect([...b.added].sort()).toEqual([...a.added].sort());
+  expect([...b.deleted].sort()).toEqual([...a.deleted].sort());
+  expect(a.moved).toEqual(["api"]);
+  expect(a.added).toEqual(["new"]);
+});
+
 // AC1 + AC2 end-to-end on a real authored scene: a no-op version bump on every
 // element yields no change; nudging one box yields exactly that box as moved.
 test("AC1/AC2: diff on a real authored scene (accepts { elements } shape)", () => {
