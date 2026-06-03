@@ -14,31 +14,38 @@ export interface ServerOptions {
   distDir?: string;
 }
 
+function sceneMsg(scene: Scene): string {
+  return JSON.stringify({ type: "scene", scene });
+}
+
+function isFile(filePath: string): boolean {
+  try {
+    return fs.statSync(filePath).isFile();
+  } catch {
+    return false;
+  }
+}
+
 export function createServer({ port = 3000, distDir = "dist" }: ServerOptions = {}): ServerHandle {
   let currentScene: Scene = null;
 
   const server = Bun.serve({
     port,
     fetch(req, srv) {
-      // Upgrade websocket connections
-      if (req.headers.get("upgrade")?.toLowerCase() === "websocket") {
-        const ok = srv.upgrade(req);
-        if (ok) return undefined;
-        return new Response("WebSocket upgrade failed", { status: 400 });
-      }
+      // Upgrade websocket connections; upgrade() returns false for plain HTTP
+      if (srv.upgrade(req)) return undefined;
 
       // Static file serving
       const url = new URL(req.url);
-      const filePath = url.pathname === "/" ? "/index.html" : url.pathname;
-      const fullPath = path.join(distDir, filePath);
+      const fullPath = path.join(distDir, url.pathname);
 
-      if (fs.existsSync(fullPath) && fs.statSync(fullPath).isFile()) {
+      if (isFile(fullPath)) {
         return new Response(Bun.file(fullPath));
       }
 
       // Fallback to index.html for SPA
       const indexPath = path.join(distDir, "index.html");
-      if (fs.existsSync(indexPath)) {
+      if (isFile(indexPath)) {
         return new Response(Bun.file(indexPath));
       }
 
@@ -48,8 +55,7 @@ export function createServer({ port = 3000, distDir = "dist" }: ServerOptions = 
       open(ws) {
         ws.subscribe("scene");
         // Replay current scene immediately
-        const msg = JSON.stringify({ type: "scene", scene: currentScene });
-        ws.send(msg);
+        ws.send(sceneMsg(currentScene));
       },
       message(_ws, _data) {
         // Future slices will handle incoming messages
@@ -60,7 +66,7 @@ export function createServer({ port = 3000, distDir = "dist" }: ServerOptions = 
 
   function setScene(scene: Scene): void {
     currentScene = scene;
-    server.publish("scene", JSON.stringify({ type: "scene", scene }));
+    server.publish("scene", sceneMsg(scene));
   }
 
   function getScene(): Scene {
