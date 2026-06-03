@@ -193,6 +193,155 @@ export function scene(opts: { dark?: boolean } = {}) {
       }),
     );
 
+  // Arrow connecting two existing boxes by id. Picks the nearest facing edge
+  // based on the dominant axis between box centers.
+  //
+  // Binding shape: { elementId, focus, gap, fixedPoint: [fx, fy] }
+  //   fixedPoint is normalized within the box: right=[1,0.5] left=[0,0.5]
+  //   top=[0.5,0] bottom=[0.5,1]
+  //
+  // Also updates both boxes' boundElements arrays with {type:"arrow",id}.
+  const connect = (
+    id: string,
+    fromBoxId: string,
+    toBoxId: string,
+    opts: { color?: string; label?: string } = {},
+  ) => {
+    const color = opts.color ?? ink;
+
+    const fromEl = els.find((e) => e.id === fromBoxId);
+    const toEl = els.find((e) => e.id === toBoxId);
+    if (!fromEl || !toEl) {
+      throw new Error(`connect: box not found. fromBoxId=${fromBoxId} toBoxId=${toBoxId}`);
+    }
+
+    // Centers
+    const fromCx = fromEl.x + fromEl.width / 2;
+    const fromCy = fromEl.y + fromEl.height / 2;
+    const toCx = toEl.x + toEl.width / 2;
+    const toCy = toEl.y + toEl.height / 2;
+
+    const dx = toCx - fromCx;
+    const dy = toCy - fromCy;
+
+    // Pick edges: dominant axis determines the facing direction
+    let startFP: [number, number];
+    let endFP: [number, number];
+    // Arrow start point (absolute) and end point (absolute) at the edge centers
+    let startX: number;
+    let startY: number;
+    let endX: number;
+    let endY: number;
+
+    if (Math.abs(dx) >= Math.abs(dy)) {
+      // Horizontal dominant
+      if (dx >= 0) {
+        // target is to the right
+        startFP = [1, 0.5];
+        endFP = [0, 0.5];
+        startX = fromEl.x + fromEl.width;
+        startY = fromEl.y + fromEl.height / 2;
+        endX = toEl.x;
+        endY = toEl.y + toEl.height / 2;
+      } else {
+        // target is to the left
+        startFP = [0, 0.5];
+        endFP = [1, 0.5];
+        startX = fromEl.x;
+        startY = fromEl.y + fromEl.height / 2;
+        endX = toEl.x + toEl.width;
+        endY = toEl.y + toEl.height / 2;
+      }
+    } else {
+      // Vertical dominant
+      if (dy >= 0) {
+        // target is below
+        startFP = [0.5, 1];
+        endFP = [0.5, 0];
+        startX = fromEl.x + fromEl.width / 2;
+        startY = fromEl.y + fromEl.height;
+        endX = toEl.x + toEl.width / 2;
+        endY = toEl.y;
+      } else {
+        // target is above
+        startFP = [0.5, 0];
+        endFP = [0.5, 1];
+        startX = fromEl.x + fromEl.width / 2;
+        startY = fromEl.y;
+        endX = toEl.x + toEl.width / 2;
+        endY = toEl.y + toEl.height;
+      }
+    }
+
+    // Points are relative to arrow origin (startX, startY)
+    const pts = [[0, 0], [endX - startX, endY - startY]];
+    const width = Math.abs(endX - startX);
+    const height = Math.abs(endY - startY);
+
+    const e: El = base({
+      type: "arrow",
+      id,
+      x: startX,
+      y: startY,
+      width,
+      height,
+      points: pts,
+      strokeColor: color,
+      strokeWidth: 2,
+      endArrowhead: "arrow",
+      startArrowhead: null,
+      lastCommittedPoint: null,
+      startBinding: {
+        elementId: fromBoxId,
+        focus: 0,
+        gap: 8,
+        fixedPoint: startFP,
+      },
+      endBinding: {
+        elementId: toBoxId,
+        focus: 0,
+        gap: 8,
+        fixedPoint: endFP,
+      },
+    });
+
+    if (opts.label) {
+      const tid = id + "_t";
+      e.boundElements = [{ type: "text", id: tid }];
+      els.push(e);
+      els.push(
+        baseText({
+          id: tid,
+          x: startX + (endX - startX) / 2 - w(opts.label, 14) / 2,
+          y: startY + (endY - startY) / 2 - 10,
+          width: w(opts.label, 14),
+          height: 20,
+          text: opts.label,
+          fontSize: 14,
+          strokeColor: color,
+          textAlign: "center",
+          verticalAlign: "middle",
+          containerId: id,
+        }),
+      );
+    } else {
+      els.push(e);
+    }
+
+    // Bidirectional: add arrow reference to both boxes' boundElements
+    const arrowRef = { type: "arrow", id };
+    if (Array.isArray(fromEl.boundElements)) {
+      fromEl.boundElements = [...fromEl.boundElements, arrowRef];
+    } else {
+      fromEl.boundElements = [arrowRef];
+    }
+    if (Array.isArray(toEl.boundElements)) {
+      toEl.boundElements = [...toEl.boundElements, arrowRef];
+    } else {
+      toEl.boundElements = [arrowRef];
+    }
+  };
+
   // Escape hatch for ellipse/diamond/etc.
   const raw = (e: El) => els.push(base(e));
 
@@ -227,5 +376,5 @@ export function scene(opts: { dark?: boolean } = {}) {
     };
   };
 
-  return { text, labeledRect, arrow, zone, raw, build, dark: DARK };
+  return { text, labeledRect, arrow, connect, zone, raw, build, dark: DARK };
 }
