@@ -149,10 +149,10 @@ The agent's "eyes" (ADR-0003). Given a scene, run the five checks: label wider t
 
 ### Acceptance criteria
 
-- [ ] Each of the five checks detects its violation on a crafted bad scene.
-- [ ] Mechanical violations are auto-fixed and the re-check passes.
-- [ ] Structural violations are reported, not silently "fixed".
-- [ ] A scene with a known violation is never reported as passing.
+- [x] Each of the five checks detects its violation on a crafted bad scene.
+- [x] Mechanical violations are auto-fixed and the re-check passes.
+- [x] Structural violations are reported, not silently "fixed".
+- [x] A scene with a known violation is never reported as passing.
 
 ---
 
