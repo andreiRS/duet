@@ -18,10 +18,10 @@ A Vite 8 + `@vitejs/plugin-react` app (React 19) that mounts `@excalidraw/excali
 
 ### Acceptance criteria
 
-- [ ] `bun run build` produces a static `dist/` with hashed chunks.
-- [ ] Opening the built page shows an editable Excalidraw canvas.
-- [ ] Build target is `es2022` for both `build.target` and `optimizeDeps.esbuildOptions.target`.
-- [ ] Pinned versions recorded in `package.json` (`bun pm view` to confirm latest at install).
+- [x] `bun run build` produces a static `dist/` with hashed chunks.
+- [~] Opening the built page shows an editable Excalidraw canvas. (source mounts `<Excalidraw/>` + bundle contains it + page serves; pixel-level confirmation deferred to slice-4 `/run` checkpoint)
+- [x] Build target is `es2022` for both `build.target` and `optimizeDeps.esbuildOptions.target`.
+- [x] Pinned versions recorded in `package.json` (`bun pm view` to confirm latest at install).
 
 ---
 
