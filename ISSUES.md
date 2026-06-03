@@ -131,9 +131,9 @@ Promote `reference/excalidraw-helper.ts` into Duet as the agent's authoring libr
 
 ### Acceptance criteria
 
-- [ ] A built scene is valid Excalidraw JSON that loads in the component without error.
-- [ ] Box labels survive as separate bound-text elements (not dropped).
-- [ ] Element ids are deterministic and match the documented scheme.
+- [x] A built scene is valid Excalidraw JSON that loads in the component without error.
+- [x] Box labels survive as separate bound-text elements (not dropped).
+- [x] Element ids are deterministic and match the documented scheme.
 
 ---
 
