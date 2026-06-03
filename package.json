@@ -3,6 +3,17 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
-    "test": "bun test"
+    "test": "bun test",
+    "dev": "vite",
+    "build": "vite build"
+  },
+  "dependencies": {
+    "@excalidraw/excalidraw": "0.18.1",
+    "react": "19.2.7",
+    "react-dom": "19.2.7"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "6.0.2",
+    "vite": "8.0.16"
   }
 }
