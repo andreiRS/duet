@@ -1,10 +1,11 @@
-import { describe, it, expect, afterEach } from "bun:test";
+import { describe, it, expect, afterEach, spyOn } from "bun:test";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
 import * as crypto from "crypto";
 import {
   shouldPersist,
+  shouldPersistEdit,
   shapeSceneForFile,
   hashContent,
   EchoGuard,
@@ -20,12 +21,41 @@ describe("shouldPersist (version gate)", () => {
     expect(shouldPersist(5, 5)).toBe(false);
   });
 
-  it("returns false when the version goes backwards", () => {
-    expect(shouldPersist(5, 3)).toBe(false);
+  it("returns true when the version changes downward (genuine smaller scene, not noise)", () => {
+    // After an agent pushes a large scene, a real human edit can yield a
+    // lower summed version. That is a genuine change and must persist; only
+    // an UNCHANGED version is noise.
+    expect(shouldPersist(5, 3)).toBe(true);
   });
 
   it("returns true on the first advancing change from the initial version", () => {
     expect(shouldPersist(0, 1)).toBe(true);
+  });
+});
+
+describe("shouldPersistEdit (client-side persist decision)", () => {
+  it("does NOT persist while a remote/agent scene is being applied (absorb the bounce)", () => {
+    expect(
+      shouldPersistEdit({ isApplyingRemote: true, prevVersion: 5, nextVersion: 9 }),
+    ).toBe(false);
+  });
+
+  it("does NOT persist when the version is unchanged (noise)", () => {
+    expect(
+      shouldPersistEdit({ isApplyingRemote: false, prevVersion: 7, nextVersion: 7 }),
+    ).toBe(false);
+  });
+
+  it("persists a genuine advancing human edit", () => {
+    expect(
+      shouldPersistEdit({ isApplyingRemote: false, prevVersion: 4, nextVersion: 5 }),
+    ).toBe(true);
+  });
+
+  it("persists a genuine human edit even when the version moves downward", () => {
+    expect(
+      shouldPersistEdit({ isApplyingRemote: false, prevVersion: 9, nextVersion: 4 }),
+    ).toBe(true);
   });
 });
 
@@ -120,6 +150,19 @@ describe("EchoGuard", () => {
     const guard = new EchoGuard();
     expect(guard.consume("never-seen")).toBe(false);
   });
+
+  it("bounds the registry to the last 16 hashes, evicting the oldest", () => {
+    const guard = new EchoGuard();
+    // Record the oldest hash, then 16 more (17 total) so the oldest is evicted.
+    guard.record("oldest");
+    for (let i = 0; i < 16; i++) guard.record(`h${i}`);
+
+    // The evicted oldest hash must no longer be treated as our own write: a
+    // later identical EXTERNAL write must NOT be wrongly skipped.
+    expect(guard.consume("oldest")).toBe(false);
+    // A recent self-write is still recognized and skipped.
+    expect(guard.consume("h15")).toBe(true);
+  });
 });
 
 describe("writeSceneFile (atomic write + echo registration)", () => {
@@ -141,6 +184,40 @@ describe("writeSceneFile (atomic write + echo registration)", () => {
     const dir = makeTmpDir();
     const filePath = path.join(dir, "scene.excalidraw");
     writeSceneFile(filePath, { elements: [], appState: {} }, new EchoGuard());
+    const leftovers = fs.readdirSync(dir).filter((f) => f.endsWith(".tmp"));
+    expect(leftovers).toEqual([]);
+  });
+
+  it("uses a UNIQUE tmp path per write even within the same millisecond (no collision/lost write)", () => {
+    const dir = makeTmpDir();
+    const filePath = path.join(dir, "scene.excalidraw");
+    const guard = new EchoGuard();
+
+    // Capture the tmp source path of every rename. Pin Date.now so a tmp name
+    // built only from pid+timestamp would be identical across writes: two
+    // concurrent writers would then share a tmp file (second clobbers the
+    // first; the first rename leaves the second's rename to ENOENT). The tmp
+    // name must therefore carry extra entropy and be unique each call.
+    const tmpPaths: string[] = [];
+    const realRename = fs.renameSync;
+    const renameSpy = spyOn(fs, "renameSync").mockImplementation(((from: fs.PathLike, to: fs.PathLike) => {
+      tmpPaths.push(String(from));
+      return realRename(from, to);
+    }) as never);
+    const realNow = Date.now;
+    Date.now = () => 1_700_000_000_000;
+    try {
+      writeSceneFile(filePath, { elements: [{ id: "first", type: "rectangle" }], appState: {} }, guard);
+      writeSceneFile(filePath, { elements: [{ id: "second", type: "rectangle" }], appState: {} }, guard);
+    } finally {
+      Date.now = realNow;
+      renameSpy.mockRestore();
+    }
+
+    expect(tmpPaths.length).toBe(2);
+    expect(tmpPaths[0]).not.toBe(tmpPaths[1]); // unique tmp paths
+    const onDisk = JSON.parse(fs.readFileSync(filePath, "utf8"));
+    expect(onDisk.elements).toEqual([{ id: "second", type: "rectangle" }]);
     const leftovers = fs.readdirSync(dir).filter((f) => f.endsWith(".tmp"));
     expect(leftovers).toEqual([]);
   });
