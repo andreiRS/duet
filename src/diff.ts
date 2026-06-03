@@ -107,11 +107,18 @@ function boundElementsEqual(
 export function diffScenes(checkpointElements: El[], currentElements: El[]): DiffReport {
   const report: DiffReport = { added: [], removed: [], moved: [], changed: [] };
 
+  // Treat isDeleted:true elements as absent — Excalidraw soft-deletes keep the
+  // element in the array but mark it deleted; we filter both inputs so that a
+  // human deletion (active → isDeleted) is reported as Removed and the reverse
+  // (isDeleted → active) is reported as Added. Inputs are not mutated.
+  const activeCheckpoint = checkpointElements.filter((e) => !e.isDeleted);
+  const activeCurrent = currentElements.filter((e) => !e.isDeleted);
+
   const checkpointById = new Map<string, El>();
-  for (const e of checkpointElements) checkpointById.set(String(e.id), e);
+  for (const e of activeCheckpoint) checkpointById.set(String(e.id), e);
 
   const currentById = new Map<string, El>();
-  for (const e of currentElements) currentById.set(String(e.id), e);
+  for (const e of activeCurrent) currentById.set(String(e.id), e);
 
   // Added: in current but not in checkpoint
   for (const [id] of currentById) {
@@ -176,6 +183,8 @@ export function diffScenes(checkpointElements: El[], currentElements: El[]): Dif
  * @param opts.store     - Pre-opened CheckpointStore (useful for testing); if omitted,
  *                         one is opened from the default .duet/ dir.
  */
+// Declared async for API stability: callers can always await it uniformly even
+// though the current implementation does only synchronous IO.
 export async function diffAgainstCheckpoint(
   sourceFilePath: string,
   opts: { entry?: CheckpointEntry; store?: CheckpointStore } = {},
