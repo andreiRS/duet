@@ -68,7 +68,7 @@ export function createServer({
         // Replay current scene immediately
         ws.send(sceneMsg(currentScene));
       },
-      message(_ws, data) {
+      message(ws, data) {
         // Browser write-back: persist the human's edit to the same file the
         // agent reads. The echo guard records the bytes so the watcher skips the
         // resulting file event instead of rebroadcasting our own write.
@@ -91,6 +91,11 @@ export function createServer({
           try {
             const shaped = writeSceneFile(filePath, { elements, appState }, echoGuard);
             currentScene = shaped as unknown as Scene;
+            // Fan out the human's edit to OTHER clients. The echo guard makes the
+            // watcher skip the file event this write triggers, so without this
+            // publish the edit never reaches other tabs until they reconnect
+            // (bug B1). ws.publish excludes the sender, so this tab does not bounce.
+            ws.publish("scene", sceneMsg(currentScene));
           } catch (err) {
             console.warn(`duet: failed to persist browser edit to ${filePath}:`, err);
           }

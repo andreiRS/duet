@@ -211,4 +211,37 @@ describe("browser → file write-back (save message)", () => {
     // atomic: no lingering tmp
     expect(fs.readdirSync(sceneDir).filter((f) => f.endsWith(".tmp"))).toEqual([]);
   });
+
+  it("a browser save fans out to other connected clients but not the sender (B1)", async () => {
+    const dir = setup();
+    const filePath = makeSceneFile();
+    const { server } = createServer({ port: 0, distDir: dir, filePath, echoGuard: new EchoGuard() });
+    addCleanup(() => server.stop(true));
+
+    const wsUrl = `ws://localhost:${server.port}/`;
+    const sender = new WebSocket(wsUrl); // tab A — makes the edit
+    const other = new WebSocket(wsUrl);  // tab B — should receive it live
+    addCleanup(() => sender.close());
+    addCleanup(() => other.close());
+
+    // Open both and consume their replay-on-connect messages.
+    await Promise.all([
+      wsOpen(sender).then(() => nextMessage(sender)),
+      wsOpen(other).then(() => nextMessage(other)),
+    ]);
+
+    const elements = [{ id: "drawn", type: "rectangle" }];
+
+    // tab B must get the fan-out; tab A must NOT bounce (publish excludes sender).
+    const otherMsg = nextMessage(other);
+    const senderBounce = nextMessage(sender, 300).then(() => "bounced").catch(() => "silent");
+
+    sender.send(JSON.stringify({ type: "save", elements, appState: {} }));
+
+    const msg = (await otherMsg) as { type: string; scene: { elements: unknown[] } };
+    expect(msg.type).toBe("scene");
+    expect(msg.scene.elements).toEqual(elements);
+
+    expect(await senderBounce).toBe("silent");
+  });
 });
