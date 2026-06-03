@@ -40,6 +40,28 @@ describe("AC1: detection", () => {
     expect(v!.ids).toContain("ar");
   });
 
+  test("arrow ending exactly 5px from the target edge PASSES (tolerance boundary)", () => {
+    const s = scene();
+    s.labeledRect("a", 0, 0, 100, 60, blue, "A", 16);
+    s.labeledRect("b", 400, 0, 100, 60, green, "B", 16);
+    // arrow ends at x=395, b's left edge is at x=400 -> exactly 5px short
+    s.arrow("ar", 100, 30, [[0, 0], [295, 0]]);
+    const r = checkGeometry(s.build());
+    expect(r.violations.find((v) => v.type === "arrow-misses-target")).toBeUndefined();
+  });
+
+  test("arrow ending 6px from the target edge IS flagged (just past tolerance)", () => {
+    const s = scene();
+    s.labeledRect("a", 0, 0, 100, 60, blue, "A", 16);
+    s.labeledRect("b", 400, 0, 100, 60, green, "B", 16);
+    // arrow ends at x=394, b's left edge is at x=400 -> 6px short
+    s.arrow("ar", 100, 30, [[0, 0], [294, 0]]);
+    const r = checkGeometry(s.build());
+    const v = r.violations.find((v) => v.type === "arrow-misses-target");
+    expect(v).toBeDefined();
+    expect(v!.ids).toContain("ar");
+  });
+
   test("detects an off-canvas element", () => {
     const s = scene();
     // a small cluster of in-bounds boxes, plus one element flung far away
@@ -51,6 +73,40 @@ describe("AC1: detection", () => {
     const v = r.violations.find((v) => v.type === "off-canvas");
     expect(v).toBeDefined();
     expect(v!.ids).toContain("off");
+  });
+
+  test("flags a moderately-off element ~500px from a 3-box cluster (and only it)", () => {
+    const s = scene();
+    // tight cluster near origin
+    s.labeledRect("a", 0, 0, 100, 60, blue, "A", 16);
+    s.labeledRect("b", 0, 120, 100, 60, blue, "B", 16);
+    s.labeledRect("c", 120, 0, 100, 60, blue, "C", 16);
+    // one box ~500px right of the cluster
+    s.labeledRect("off", 720, 0, 100, 60, green, "X", 16);
+    const r = checkGeometry(s.build());
+    const offs = r.violations.filter((v) => v.type === "off-canvas");
+    expect(offs).toHaveLength(1);
+    expect(offs[0].ids).toEqual(["off"]);
+  });
+
+  test("with two elements, only the flung-away one is flagged (not both)", () => {
+    const s = scene();
+    s.labeledRect("home", 0, 0, 100, 60, blue, "A", 16);
+    s.labeledRect("off", 5000, 0, 100, 60, green, "X", 16);
+    const r = checkGeometry(s.build());
+    const offs = r.violations.filter((v) => v.type === "off-canvas");
+    expect(offs).toHaveLength(1);
+    expect(offs[0].ids).toEqual(["off"]);
+  });
+
+  test("a reasonable spread-out layout is NOT flagged as off-canvas", () => {
+    const s = scene();
+    s.labeledRect("a", 0, 0, 100, 60, blue, "A", 16);
+    s.labeledRect("b", 300, 0, 100, 60, blue, "B", 16);
+    s.labeledRect("c", 0, 300, 100, 60, blue, "C", 16);
+    s.labeledRect("d", 300, 300, 100, 60, green, "D", 16);
+    const r = checkGeometry(s.build());
+    expect(r.violations.find((v) => v.type === "off-canvas")).toBeUndefined();
   });
 
   test("detects two elements closer than 20px", () => {
@@ -88,6 +144,21 @@ describe("AC2: mechanical auto-fix", () => {
     const r = checkGeometry(s.build());
     const again = recheck(r.fixed);
     expect(again.violations.find((v) => v.type === "off-canvas")).toBeUndefined();
+  });
+
+  test("with two elements, the fix pulls the outlier back and leaves the in-bounds one near origin", () => {
+    const s = scene();
+    s.labeledRect("home", 0, 0, 100, 60, blue, "A", 16);
+    s.labeledRect("off", 5000, 0, 100, 60, green, "X", 16);
+    const r = checkGeometry(s.build());
+    const again = recheck(r.fixed);
+    expect(again.violations.find((v) => v.type === "off-canvas")).toBeUndefined();
+    // the in-bounds element stayed put near origin (was not dragged out to the outlier)
+    const home = r.fixed.find((e) => e.id === "home")!;
+    expect(Math.abs(home.x)).toBeLessThan(200);
+    // the outlier was pulled back next to home
+    const off = r.fixed.find((e) => e.id === "off")!;
+    expect(off.x).toBeLessThan(500);
   });
 
   test("pushes too-close elements apart, and the re-check is clean", () => {
@@ -139,6 +210,44 @@ describe("AC3: structural violations are flagged, not fixed", () => {
     s.arrow("ar", 100, 30, [[0, 0], [200, 0]]);
     const r = checkGeometry(s.build());
     expect(r.remaining.find((v) => v.type === "arrow-misses-target")).toBeDefined();
+  });
+});
+
+// `remaining` must list EVERY still-standing violation after the fix, so it
+// always explains why `ok` is false (not just structural ones).
+describe("remaining surfaces all unresolved violations", () => {
+  test("remaining equals the set of violations still present in the fixed scene", () => {
+    const s = scene();
+    s.labeledRect("a", 0, 0, 100, 100, blue, "A", 16);
+    s.labeledRect("b", 50, 50, 100, 100, green, "B", 16); // overlap (structural)
+    s.labeledRect("box", 800, 800, 40, 50, blue, "a very long label that overflows", 20); // mechanical
+    const r = checkGeometry(s.build());
+    const stillThere = checkGeometry(r.fixed).violations;
+    // remaining is exactly what is still standing after the auto-fix
+    const key = (v: { type: string; ids: string[] }) => v.type + ":" + [...v.ids].sort().join(",");
+    expect(r.remaining.map(key).sort()).toEqual(stillThere.map(key).sort());
+  });
+
+  test("any violation still standing after the fix is surfaced in remaining, and ok is false", () => {
+    // An off-canvas arrow gets relocated next to the cluster by the mechanical
+    // fix, after which it no longer reaches its target (a structural
+    // arrow-misses). The point under test: whatever is left standing after the
+    // auto-fix loop, of ANY kind, must appear in remaining so it explains ok.
+    // (Pure-mechanical leftovers can only occur if the 50-pass cap is hit; the
+    // filter below would surface those identically.)
+    const s = scene();
+    s.labeledRect("a", 0, 0, 100, 60, blue, "A", 16);
+    s.labeledRect("b", 0, 120, 100, 60, blue, "B", 16);
+    s.labeledRect("c", 120, 0, 100, 60, blue, "C", 16);
+    s.arrow("far", 9000, 9000, [[0, 0], [50, 0]]);
+    const r = checkGeometry(s.build());
+    const stillThere = checkGeometry(r.fixed).violations;
+    expect(stillThere.length).toBeGreaterThan(0);
+    expect(r.ok).toBe(false);
+    // every still-standing violation is surfaced in remaining
+    for (const v of stillThere) {
+      expect(r.remaining.find((x) => x.type === v.type && x.ids.join() === v.ids.join())).toBeDefined();
+    }
   });
 });
 

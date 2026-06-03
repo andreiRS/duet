@@ -31,7 +31,11 @@ export interface GeometryResult {
 // Tolerances / thresholds
 const ARROW_TOL = 5; // px: arrow endpoint must be within this of the target edge
 const MIN_SPACING = 20; // px: elements closer than this (and not overlapping) are too tight
-const OFF_CANVAS_GAP = 1000; // px: an element whose nearest neighbor is this far is off-canvas
+// px: an element sitting farther than this from the cluster of all the other
+// elements (gap from its bbox to the bounding box of every other real element)
+// is treated as off-canvas. Chosen so a moderately-displaced box (~400px+) is
+// caught while a normal spread-out layout (boxes a few hundred px apart) is not.
+const OFF_CANVAS_GAP = 350;
 const STRUCTURAL: ViolationType[] = ["box-overlap", "arrow-misses-target"];
 
 interface Rect {
@@ -114,6 +118,10 @@ function detect(els: El[]): Violation[] {
 
   // 3. Arrow endpoint misses target edge: end point farther than tolerance from
   //    the nearest box edge (structural). We check against the closest box.
+  //    KNOWN v1 LIMITATION: this measures the arrow end against the NEAREST box,
+  //    not a semantically-bound target. Authored arrows aren't bound to a target
+  //    yet in v1, so "nearest box" is the best available proxy. Once arrows carry
+  //    an explicit endBinding/target id, this should check against that target.
   for (const a of els) {
     if (a.type !== "arrow") continue;
     const end = arrowEnd(a);
@@ -148,23 +156,66 @@ function detect(els: El[]): Violation[] {
   return out;
 }
 
-// Ids of elements that sit off-canvas: so far from every other element that
-// they have fallen off the visible diagram. Measured as the gap to the nearest
-// neighbour exceeding a large threshold, which catches a flung-away element
-// without flagging normal spread-out layouts.
+// Center of an element's bounding box.
+function center(e: El): { x: number; y: number } {
+  const r = bbox(e);
+  return { x: r.x + r.w / 2, y: r.y + r.h / 2 };
+}
+
+// Bounding box enclosing a set of elements.
+function unionBbox(els: El[]): Rect {
+  const rs = els.map(bbox);
+  const minX = Math.min(...rs.map((r) => r.x));
+  const minY = Math.min(...rs.map((r) => r.y));
+  const maxX = Math.max(...rs.map((r) => r.x + r.w));
+  const maxY = Math.max(...rs.map((r) => r.y + r.h));
+  return { x: minX, y: minY, w: maxX - minX, h: maxY - minY };
+}
+
+// Ids of elements that sit off-canvas. The rule is cluster-anchored and
+// asymmetric: instead of a symmetric nearest-neighbour gap (which mis-fires on
+// a 2-element scene by flagging BOTH boxes, and only catches extreme outliers),
+// we pick a SINGLE outlier candidate and measure it against the cluster of all
+// the OTHER elements. The candidate is the element farthest from the centroid
+// of the rest (so removing it leaves the others tightest); ties (e.g. a
+// 2-element scene) break toward the element farther from the origin, since
+// diagrams are authored starting near (0,0). The candidate is flagged only when
+// its bbox sits more than OFF_CANVAS_GAP from the bounding box of the rest, so
+// the fix pulls only the outlier back and never drags the in-bounds elements.
 function offCanvasIds(els: El[]): string[] {
   const real = els.filter((e) => e.id !== "darkbg" && e.type !== "text");
   if (real.length < 2) return [];
-  const out: string[] = [];
+
+  // distance from each element to the centroid of all the OTHER real elements
+  const distToRest = (e: El): number => {
+    const rest = real.filter((o) => o.id !== e.id);
+    const sx = rest.reduce((s, o) => s + center(o).x, 0) / rest.length;
+    const sy = rest.reduce((s, o) => s + center(o).y, 0) / rest.length;
+    const c = center(e);
+    return Math.hypot(c.x - sx, c.y - sy);
+  };
+  const fromOrigin = (e: El): number => {
+    const c = center(e);
+    return Math.hypot(c.x, c.y);
+  };
+
+  // Pick the single outlier candidate; break ties by distance from origin.
+  let candidate = real[0];
+  let worst = -Infinity;
   for (const e of real) {
-    let nearest = Infinity;
-    for (const o of real) {
-      if (o.id === e.id) continue;
-      nearest = Math.min(nearest, gap(bbox(e), bbox(o)));
+    const d = distToRest(e);
+    if (d > worst || (d === worst && fromOrigin(e) > fromOrigin(candidate))) {
+      worst = d;
+      candidate = e;
     }
-    if (nearest > OFF_CANVAS_GAP) out.push(e.id);
   }
-  return out;
+
+  // Flag it only if it is genuinely detached from the rest of the diagram.
+  const rest = real.filter((e) => e.id !== candidate.id);
+  if (gap(bbox(candidate), unionBbox(rest)) > OFF_CANVAS_GAP) {
+    return [candidate.id];
+  }
+  return [];
 }
 
 // Center of an element's nearest neighbour, used to pull an off-canvas element
@@ -200,7 +251,7 @@ function applyFix(els: El[], v: Violation): boolean {
       if (!label) return false;
       const pad = 10;
       const newW = (label.width ?? 0) + pad * 2;
-      box.x = box.x - (newW - box.width) / 2; // grow around the center
+      box.x = box.x - (newW - (box.width ?? 0)) / 2; // grow around the center
       box.width = newW;
       label.x = box.x + (box.width - (label.width ?? 0)) / 2;
       return true;
@@ -282,7 +333,14 @@ export function checkGeometry(input: { elements?: El[] } | El[]): GeometryResult
 
   const fixed = autoFix(original);
   const afterFix = detect(fixed);
-  const remaining = afterFix.filter((v) => STRUCTURAL.includes(v.type));
+
+  // `remaining` lists EVERY violation still standing after the auto-fix, not
+  // just structural ones. Structural violations are never auto-fixed so they
+  // always appear here (that invariant is relied on by AC3/AC4). A mechanical
+  // violation only survives if the fix loop could not clear it (e.g. it hit the
+  // 50-pass cap); surfacing it too means `remaining` always explains why `ok`
+  // is false, instead of silently dropping an unresolved mechanical issue.
+  const remaining = afterFix;
 
   // ok only when the fixed scene has NO violation of any kind left standing.
   return {
