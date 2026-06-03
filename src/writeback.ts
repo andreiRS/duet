@@ -1,5 +1,6 @@
 import * as fs from "fs";
 import * as crypto from "crypto";
+import type { ExcalidrawScene, El } from "./scene-types";
 
 // Version gate: persist a browser edit only when the scene version actually
 // CHANGES. Mouse-move/hover/selection/pointer noise re-fires Excalidraw's
@@ -29,21 +30,17 @@ export function shouldPersistEdit(args: {
 // The only appState keys we persist. Everything else (scroll, zoom, selection,
 // collaborators, cursor, drag state, ...) is transient view/session state and
 // must never be written to the shared scene file.
-const APP_STATE_WHITELIST = ["viewBackgroundColor", "gridSize", "theme"] as const;
+// Exported so the client (App.tsx) uses the same literal — one source of truth.
+export const APP_STATE_WHITELIST = ["viewBackgroundColor", "gridSize", "theme"] as const;
 
 export interface SceneInput {
   elements?: unknown;
   appState?: Record<string, unknown> | null;
 }
 
-export interface ShapedScene {
-  type: "excalidraw";
-  version: 2;
-  source: string;
-  elements: unknown[];
-  appState: Record<string, unknown>;
-  files: Record<string, unknown>;
-}
+// Re-export the shared envelope type as ShapedScene so callers (cli.ts,
+// authoring.ts) can import it from a single place.
+export type ShapedScene = ExcalidrawScene;
 
 // Build the defensive on-disk excalidraw envelope. Drops everything transient
 // even if the client sent extra keys: only whitelisted appState survives.
@@ -57,7 +54,7 @@ export function shapeSceneForFile(scene: SceneInput, source: string): ShapedScen
     type: "excalidraw",
     version: 2,
     source,
-    elements: Array.isArray(scene.elements) ? scene.elements : [],
+    elements: Array.isArray(scene.elements) ? (scene.elements as El[]) : [],
     appState,
     files: {},
   };

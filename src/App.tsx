@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Excalidraw, CaptureUpdateAction, getSceneVersion } from "@excalidraw/excalidraw";
 import "@excalidraw/excalidraw/index.css";
-import { shouldPersistEdit } from "./writeback";
+import { shouldPersistEdit, APP_STATE_WHITELIST } from "./writeback";
 
 type ExcalidrawAPI = {
   updateScene: (sceneData: {
@@ -12,9 +12,8 @@ type ExcalidrawAPI = {
   getSceneElements: () => readonly unknown[];
 };
 
-// appState keys we persist on the browser side too (mirror of the server
-// whitelist). Everything else is transient view/session state.
-const PERSISTED_APP_STATE = ["viewBackgroundColor", "gridSize", "theme"] as const;
+// appState keys we persist on the browser side too (shared with the server
+// whitelist via APP_STATE_WHITELIST from writeback.ts — one source of truth).
 
 const SAVE_DEBOUNCE_MS = 400;
 
@@ -74,7 +73,7 @@ export default function App() {
     lastVersionRef.current = nextVersion;
 
     const persistedAppState: Record<string, unknown> = {};
-    for (const key of PERSISTED_APP_STATE) {
+    for (const key of APP_STATE_WHITELIST) {
       if (key in appState) persistedAppState[key] = appState[key];
     }
     const payload = {

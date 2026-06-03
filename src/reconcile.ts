@@ -14,7 +14,8 @@
 // moved, that human nudge is not re-added. The agent's structural intent wins.
 // This is acceptable for v1.
 
-export type El = Record<string, any>;
+import type { El } from "./scene-types";
+export type { El } from "./scene-types";
 
 export interface Diff {
   moved: string[];

@@ -7,7 +7,8 @@
 //   arrow:     <id>
 //   arrow label: <id>_t
 
-export type El = Record<string, unknown>;
+import type { ExcalidrawScene, El } from "./scene-types";
+export type { El } from "./scene-types";
 
 // [zoneBg, boxFill, accent] per family
 export const PALETTE = {
@@ -195,7 +196,7 @@ export function scene(opts: { dark?: boolean } = {}) {
   // Escape hatch for ellipse/diamond/etc.
   const raw = (e: El) => els.push(base(e));
 
-  const build = () => {
+  const build = (): ExcalidrawScene => {
     const all = [...els];
     if (DARK) {
       all.unshift(
@@ -222,6 +223,7 @@ export function scene(opts: { dark?: boolean } = {}) {
         viewBackgroundColor: DARK ? "#1e1e2e" : "#ffffff",
         gridSize: null,
       },
+      files: {},
     };
   };
 

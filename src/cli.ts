@@ -1,9 +1,9 @@
 import * as fs from "fs";
 import { createServer, type ServerHandle, type Scene } from "./server";
 import { watchScene, type WatchHandle } from "./watch";
-import { EchoGuard, hashContent } from "./writeback";
+import { EchoGuard, hashContent, type ShapedScene } from "./writeback";
 
-export const EMPTY_SCENE = {
+export const EMPTY_SCENE: ShapedScene = {
   type: "excalidraw",
   version: 2,
   source: "https://excalidraw.com",

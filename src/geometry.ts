@@ -7,7 +7,8 @@
 // Element-geometry parsing (bounding box, arrow endpoints) is reused from the
 // prior art in reference/local-renderer.ts (buildSvg bounds + arrow points).
 
-export type El = Record<string, any>;
+import type { El } from "./scene-types";
+export type { El } from "./scene-types";
 
 export type ViolationType =
   | "label-wider-than-box"
