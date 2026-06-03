@@ -235,9 +235,48 @@ describe("diffScenes — multiple elements", () => {
       el("fresh"),
     ];
     const report = diffScenes(checkpoint, current);
-    expect(report.added).toEqual(["fresh"]);
-    expect(report.removed).toEqual(["gone"]);
-    expect(report.moved).toEqual(["move"]);
+    expect(report.added).toContain("fresh");
+    expect(report.added).toHaveLength(1);
+    expect(report.removed).toContain("gone");
+    expect(report.removed).toHaveLength(1);
+    expect(report.moved).toContain("move");
+    expect(report.moved).toHaveLength(1);
+    expect(report.changed).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// isDeleted: Excalidraw soft-delete
+// ---------------------------------------------------------------------------
+
+describe("diffScenes — isDeleted (Excalidraw soft-delete)", () => {
+  it("AC-DEL1: active in checkpoint, isDeleted:true in current → Removed", () => {
+    const checkpoint: El[] = [el("gone")];
+    const current: El[] = [el("gone", { isDeleted: true })];
+    const report = diffScenes(checkpoint, current);
+    expect(report.removed).toContain("gone");
+    expect(report.added).toHaveLength(0);
+    expect(report.moved).toHaveLength(0);
+    expect(report.changed).toHaveLength(0);
+  });
+
+  it("AC-DEL2: isDeleted:true in checkpoint, active in current → Added", () => {
+    const checkpoint: El[] = [el("revived", { isDeleted: true })];
+    const current: El[] = [el("revived")];
+    const report = diffScenes(checkpoint, current);
+    expect(report.added).toContain("revived");
+    expect(report.removed).toHaveLength(0);
+    expect(report.moved).toHaveLength(0);
+    expect(report.changed).toHaveLength(0);
+  });
+
+  it("AC-DEL3: isDeleted:true in both checkpoint and current → no bucket", () => {
+    const checkpoint: El[] = [el("phantom", { isDeleted: true })];
+    const current: El[] = [el("phantom", { isDeleted: true })];
+    const report = diffScenes(checkpoint, current);
+    expect(report.added).toHaveLength(0);
+    expect(report.removed).toHaveLength(0);
+    expect(report.moved).toHaveLength(0);
     expect(report.changed).toHaveLength(0);
   });
 });
