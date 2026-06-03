@@ -1,5 +1,5 @@
-import * as fs from "fs";
-import type { El, ExcalidrawScene } from "./scene-types";
+import type { El } from "./scene-types";
+import { readSceneFile, elementsOf } from "./scene-io";
 import { writeSceneFile, type EchoGuard } from "./writeback";
 
 export interface LoadedScene {
@@ -17,9 +17,8 @@ export interface LoadedScene {
  * Mutations to the returned elements are saved via .save(guard).
  */
 export function load(filePath: string): LoadedScene {
-  const raw = fs.readFileSync(filePath, "utf8");
-  const parsed = JSON.parse(raw) as ExcalidrawScene;
-  const elements: El[] = Array.isArray(parsed.elements) ? parsed.elements : [];
+  const parsed = readSceneFile(filePath);
+  const elements: El[] = elementsOf(parsed);
   const appState = parsed.appState ?? {};
 
   return {

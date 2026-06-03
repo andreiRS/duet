@@ -1,5 +1,5 @@
-import * as fs from "fs";
-import type { El, ExcalidrawScene } from "./scene-types";
+import type { El } from "./scene-types";
+import { readSceneFile, elementsOf } from "./scene-io";
 import { openCheckpointStore } from "./checkpoint";
 import type { CheckpointEntry, CheckpointStore } from "./checkpoint";
 
@@ -168,6 +168,14 @@ export function diffScenes(checkpointElements: El[], currentElements: El[]): Dif
 }
 
 // ---------------------------------------------------------------------------
+// Factory for an empty diff report
+// ---------------------------------------------------------------------------
+
+export function emptyDiffReport(): DiffReport {
+  return { added: [], removed: [], moved: [], changed: [] };
+}
+
+// ---------------------------------------------------------------------------
 // Convenience wrapper
 // ---------------------------------------------------------------------------
 
@@ -192,27 +200,21 @@ export async function diffAgainstCheckpoint(
   const store = opts.store ?? openCheckpointStore(sourceFilePath);
 
   // Read current file
-  const rawCurrent = fs.readFileSync(sourceFilePath, "utf8");
-  const currentScene = JSON.parse(rawCurrent) as ExcalidrawScene;
-  const currentElements: El[] = Array.isArray(currentScene.elements) ? currentScene.elements : [];
+  const currentScene = readSceneFile(sourceFilePath);
+  const currentElements: El[] = elementsOf(currentScene);
 
   // Resolve checkpoint entry
   const entry = opts.entry ?? store.latest();
 
   // No checkpoint → everything is Added
   if (!entry) {
-    return {
-      added: currentElements.map((e) => String(e.id)),
-      removed: [],
-      moved: [],
-      changed: [],
-    };
+    const report = emptyDiffReport();
+    report.added = currentElements.map((e) => String(e.id));
+    return report;
   }
 
   const checkpointScene = store.readScene(entry);
-  const checkpointElements: El[] = Array.isArray(checkpointScene.elements)
-    ? checkpointScene.elements
-    : [];
+  const checkpointElements: El[] = elementsOf(checkpointScene);
 
   return diffScenes(checkpointElements, currentElements);
 }

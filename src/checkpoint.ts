@@ -68,14 +68,14 @@ function readManifest(dir: string): CheckpointEntry[] {
 
 function writeManifest(dir: string, entries: CheckpointEntry[]): void {
   const p = path.join(dir, MANIFEST_FILE);
-  const tmpP = `${p}.${process.pid}.${crypto.randomBytes(4).toString("hex")}.tmp`;
+  const tmpP = `${p}.${process.pid}.${Date.now()}.${crypto.randomBytes(6).toString("hex")}.tmp`;
   fs.writeFileSync(tmpP, JSON.stringify(entries, null, 2), "utf8");
   fs.renameSync(tmpP, p);
 }
 
 function writeSceneAtomic(scenePath: string, scene: ExcalidrawScene): void {
   const bytes = JSON.stringify(scene, null, 2);
-  const tmpPath = `${scenePath}.${process.pid}.${crypto.randomBytes(4).toString("hex")}.tmp`;
+  const tmpPath = `${scenePath}.${process.pid}.${Date.now()}.${crypto.randomBytes(6).toString("hex")}.tmp`;
   fs.writeFileSync(tmpPath, bytes, "utf8");
   fs.renameSync(tmpPath, scenePath);
 }

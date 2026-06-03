@@ -1,10 +1,8 @@
 import type { CheckpointEntry, CheckpointStore } from "./checkpoint";
 import { openCheckpointStore } from "./checkpoint";
-import { diffScenes } from "./diff";
+import { diffAgainstCheckpoint, emptyDiffReport } from "./diff";
 import type { DiffReport } from "./diff";
 import { writeSceneFile, type EchoGuard } from "./writeback";
-import * as fs from "fs";
-import type { ExcalidrawScene, El } from "./scene-types";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -45,30 +43,15 @@ export async function restoreCheckpoint(
     force?: boolean;
   } = {},
 ): Promise<RestoreResult> {
-  const emptyDiff: DiffReport = { added: [], removed: [], moved: [], changed: [] };
-
   const store = opts.store ?? openCheckpointStore(sourceFilePath);
   const entry = opts.entry ?? store.latest();
 
   if (!entry) {
-    return { restored: false, diff: emptyDiff, reason: "no checkpoint" };
+    return { restored: false, diff: emptyDiffReport(), reason: "no checkpoint" };
   }
 
-  // Read checkpoint scene
-  const checkpointScene = store.readScene(entry);
-  const checkpointElements: El[] = Array.isArray(checkpointScene.elements)
-    ? checkpointScene.elements
-    : [];
-
-  // Read current file
-  const rawCurrent = fs.readFileSync(sourceFilePath, "utf8");
-  const currentScene = JSON.parse(rawCurrent) as ExcalidrawScene;
-  const currentElements: El[] = Array.isArray(currentScene.elements)
-    ? currentScene.elements
-    : [];
-
-  // Compute diff (checkpoint vs. current)
-  const diff = diffScenes(checkpointElements, currentElements);
+  // Use diffAgainstCheckpoint to compute the diff (avoids re-reading + re-diffing inline)
+  const diff = await diffAgainstCheckpoint(sourceFilePath, { entry, store });
 
   const isDirty =
     diff.added.length > 0 ||
@@ -80,6 +63,9 @@ export async function restoreCheckpoint(
   if (isDirty && !opts.force) {
     return { restored: false, diff };
   }
+
+  // Read checkpoint scene for write-back (diffAgainstCheckpoint read it too — acceptable)
+  const checkpointScene = store.readScene(entry);
 
   // Write checkpoint scene back atomically
   writeSceneFile(
