@@ -1,6 +1,7 @@
 import * as fs from "fs";
 import { createServer, type ServerHandle, type Scene } from "./server";
 import { watchScene, type WatchHandle } from "./watch";
+import { EchoGuard, hashContent } from "./writeback";
 
 export const EMPTY_SCENE = {
   type: "excalidraw",
@@ -38,13 +39,20 @@ export function bootstrap({
 }: BootstrapOptions): BootstrapHandle {
   ensureScene(filePath);
   const scene = JSON.parse(fs.readFileSync(filePath, "utf8"));
-  const handle = createServer({ port });
+
+  // One echo-guard registry shared by both halves of the loop: the server
+  // records the bytes it writes for a browser save, and the watcher consumes
+  // the matching hash so Duet's own write-back never bounces to the browser.
+  const echoGuard = new EchoGuard();
+  const handle = createServer({ port, filePath, echoGuard });
   handle.setScene(scene);
 
   // Watch the served file: on each valid change, push it to all browser tabs.
   // Malformed/partial reads keep the last good scene (handled inside watchScene).
+  // shouldSkip drops the events caused by our own write-back (echo guard).
   const watcher = watchScene(filePath, {
     onScene: (parsed) => handle.setScene(parsed as Scene),
+    shouldSkip: (raw) => echoGuard.consume(hashContent(raw)),
   });
 
   const url = `http://localhost:${handle.server.port}/`;

@@ -1,5 +1,6 @@
 import * as path from "path";
 import * as fs from "fs";
+import { EchoGuard, writeSceneFile } from "./writeback";
 
 export type Scene = Record<string, unknown> | null;
 
@@ -12,6 +13,11 @@ export interface ServerHandle {
 export interface ServerOptions {
   port?: number;
   distDir?: string;
+  // When provided, the server persists incoming {type:"save"} browser edits to
+  // this file (atomic write). The echo guard is shared with the watcher so the
+  // resulting file event is recognized as Duet's own and not bounced back.
+  filePath?: string;
+  echoGuard?: EchoGuard;
 }
 
 function sceneMsg(scene: Scene): string {
@@ -26,7 +32,12 @@ function isFile(filePath: string): boolean {
   }
 }
 
-export function createServer({ port = 3000, distDir = "dist" }: ServerOptions = {}): ServerHandle {
+export function createServer({
+  port = 3000,
+  distDir = "dist",
+  filePath,
+  echoGuard,
+}: ServerOptions = {}): ServerHandle {
   let currentScene: Scene = null;
 
   const server = Bun.serve({
@@ -57,8 +68,33 @@ export function createServer({ port = 3000, distDir = "dist" }: ServerOptions = 
         // Replay current scene immediately
         ws.send(sceneMsg(currentScene));
       },
-      message(_ws, _data) {
-        // Future slices will handle incoming messages
+      message(_ws, data) {
+        // Browser write-back: persist the human's edit to the same file the
+        // agent reads. The echo guard records the bytes so the watcher skips the
+        // resulting file event instead of rebroadcasting our own write.
+        if (!filePath || !echoGuard) return;
+        let msg: unknown;
+        try {
+          msg = JSON.parse(typeof data === "string" ? data : data.toString());
+        } catch {
+          return; // ignore non-JSON
+        }
+        if (
+          typeof msg === "object" &&
+          msg !== null &&
+          (msg as { type?: unknown }).type === "save"
+        ) {
+          const { elements, appState } = msg as {
+            elements?: unknown;
+            appState?: Record<string, unknown> | null;
+          };
+          try {
+            const shaped = writeSceneFile(filePath, { elements, appState }, echoGuard);
+            currentScene = shaped as unknown as Scene;
+          } catch (err) {
+            console.warn(`duet: failed to persist browser edit to ${filePath}:`, err);
+          }
+        }
       },
       close(_ws) {},
     },

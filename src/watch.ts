@@ -5,6 +5,10 @@ import chokidar from "chokidar";
 export interface WatchOptions {
   onScene: (scene: unknown) => void;
   onError?: (err: unknown) => void;
+  // Echo guard hook: given the exact bytes just read, return true to SKIP this
+  // event (it is Duet's own write-back, not an external/agent edit). Keeps the
+  // hash registry out of the watcher; the caller shares it with the write path.
+  shouldSkip?: (rawBytes: string) => boolean;
 }
 
 export interface WatchHandle {
@@ -36,7 +40,7 @@ function defaultCreateWatcher(dir: string): SceneWatcher {
 
 export function watchScene(
   filePath: string,
-  { onScene, onError }: WatchOptions,
+  { onScene, onError, shouldSkip }: WatchOptions,
   { createWatcher = defaultCreateWatcher }: WatchDeps = {},
 ): WatchHandle {
   const target = path.resolve(filePath);
@@ -49,9 +53,20 @@ export function watchScene(
   });
 
   function readAndEmit() {
+    let raw: string;
+    try {
+      raw = fs.readFileSync(target, "utf8");
+    } catch (err) {
+      console.warn(`duet: ignoring unreadable scene at ${target}:`, err);
+      onError?.(err);
+      return;
+    }
+    // Echo guard: if these exact bytes are Duet's own write-back, consume and
+    // skip so the rename-into-place event does not bounce back to the browser.
+    if (shouldSkip?.(raw)) return;
     let parsed: unknown;
     try {
-      parsed = JSON.parse(fs.readFileSync(target, "utf8"));
+      parsed = JSON.parse(raw);
     } catch (err) {
       // Malformed or partial read (agent mid-write). Keep the last good scene:
       // do not call onScene. Warn and report.

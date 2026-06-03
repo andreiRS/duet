@@ -1,5 +1,6 @@
 import { describe, it, expect, afterEach } from "bun:test";
 import { createServer } from "./server";
+import { EchoGuard } from "./writeback";
 import * as path from "path";
 import * as fs from "fs";
 import * as os from "os";
@@ -166,5 +167,48 @@ describe("HTTP static serving", () => {
 
     expect(res.status).toBe(200);
     expect(text).toContain("console.log");
+  });
+});
+
+// ─── Slice 6: browser → file write-back via {type:"save"} WS message ─────────
+
+let sceneDir: string;
+function makeSceneFile(): string {
+  sceneDir = fs.mkdtempSync(path.join(os.tmpdir(), "duet-save-test-"));
+  const filePath = path.join(sceneDir, "scene.excalidraw");
+  fs.writeFileSync(filePath, JSON.stringify({ type: "excalidraw", elements: [], appState: {} }), "utf8");
+  addCleanup(() => fs.rmSync(sceneDir, { recursive: true, force: true }));
+  return filePath;
+}
+
+describe("browser → file write-back (save message)", () => {
+  it("a {type:'save'} message writes the elements to the scene file", async () => {
+    const dir = setup();
+    const filePath = makeSceneFile();
+    const { server } = createServer({ port: 0, distDir: dir, filePath, echoGuard: new EchoGuard() });
+    addCleanup(() => server.stop(true));
+
+    const ws = new WebSocket(`ws://localhost:${server.port}/`);
+    addCleanup(() => ws.close());
+    await wsOpen(ws);
+    await nextMessage(ws); // consume replay
+
+    const elements = [{ id: "drawn", type: "rectangle" }];
+    ws.send(JSON.stringify({ type: "save", elements, appState: { viewBackgroundColor: "#eee", scrollX: 5 } }));
+
+    // Poll the file until the write lands (no fixed-sleep race on a positive assertion).
+    let onDisk: any;
+    for (let i = 0; i < 100; i++) {
+      const raw = fs.readFileSync(filePath, "utf8");
+      onDisk = JSON.parse(raw);
+      if (onDisk.elements.length > 0) break;
+      await new Promise((r) => setTimeout(r, 20));
+    }
+    expect(onDisk.elements).toEqual(elements);
+    // whitelist held: viewBackgroundColor kept, scrollX dropped
+    expect(onDisk.appState).toEqual({ viewBackgroundColor: "#eee" });
+    expect(onDisk.files).toEqual({});
+    // atomic: no lingering tmp
+    expect(fs.readdirSync(sceneDir).filter((f) => f.endsWith(".tmp"))).toEqual([]);
   });
 });

@@ -178,3 +178,64 @@ describe("bootstrap", () => {
     expect(handle.getScene()).toEqual(good2);
   });
 });
+
+// ─── Slice 6: full write→watch→push→onChange→write loop + echo guard ──────────
+
+// Count every {type:"scene"} broadcast for a bounded window, ignoring the
+// initial replay. Lets us assert a self-write produces ZERO broadcasts (echo
+// guard) while an external write produces one.
+function collectScenes(ws: WebSocket): { scenes: any[] } {
+  const scenes: any[] = [];
+  ws.addEventListener("message", (e) => {
+    const msg = JSON.parse(e.data as string);
+    if (msg.type === "scene") scenes.push(msg.scene);
+  });
+  return { scenes };
+}
+
+describe("browser write-back echo guard (full loop)", () => {
+  it("a browser save writes the file but does NOT bounce back as a scene broadcast; an external write DOES", async () => {
+    tmpDir = makeTmpDir();
+    const filePath = path.join(tmpDir, "loop.excalidraw");
+
+    const handle = bootstrap({ filePath, port: 0, openBrowser: () => {} });
+    handles.push(handle);
+
+    const ws = new WebSocket(`ws://localhost:${handle.server.port}/`);
+    handles.push({ close: async () => ws.close() });
+    await wsOpen(ws);
+    await nextSceneMessage(ws); // consume replay
+
+    // chokidar ready settle
+    await new Promise((r) => setTimeout(r, 250));
+
+    const collector = collectScenes(ws);
+
+    // 1. Browser save → server writes the file via the shared echo guard.
+    const drawn = [{ id: "by-human", type: "rectangle" }];
+    ws.send(JSON.stringify({ type: "save", elements: drawn, appState: { viewBackgroundColor: "#eee" } }));
+
+    // Wait for the file to actually be written (positive: poll). This proves the
+    // loop runs end-to-end (save → server write), not that nothing happened.
+    let written: any = { elements: [] };
+    for (let i = 0; i < 100; i++) {
+      written = JSON.parse(fs.readFileSync(filePath, "utf8"));
+      if (written.elements.length > 0) break;
+      await new Promise((r) => setTimeout(r, 20));
+    }
+    expect(written.elements).toEqual(drawn);
+    // Bounded wait for any (wrongful) echo broadcast to arrive.
+    await new Promise((r) => setTimeout(r, 800));
+    expect(collector.scenes.length).toBe(0); // echo guard held: no self-bounce
+
+    // 2. External (agent) write with DIFFERENT bytes → must broadcast.
+    const agentScene = { type: "excalidraw", version: 2, elements: [{ id: "by-agent" }], appState: {}, files: {} };
+    fs.writeFileSync(filePath, JSON.stringify(agentScene), "utf8");
+    for (let i = 0; i < 150; i++) {
+      if (collector.scenes.length > 0) break;
+      await new Promise((r) => setTimeout(r, 20));
+    }
+    expect(collector.scenes.length).toBe(1);
+    expect(collector.scenes[0]).toEqual(agentScene);
+  });
+});
