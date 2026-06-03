@@ -170,10 +170,12 @@ describe("AC3: history cap and pruning", () => {
     expect(store.get(labeled.id)).toBeDefined();
     expect(store.get("keep-me")).toBeDefined();
 
-    // oldest auto ones should be pruned
-    // 12 total saves, labeled=1, auto=11, cap=10 for auto means 1 auto pruned
-    // But labeled stays, so total could be 10 auto + 1 labeled = 11
+    // 1 labeled + 11 autos saved; cap=10 for auto means 1 oldest auto evicted
+    // Total surviving = 1 labeled + 10 autos = 11
     const list = store.list();
+    expect(list.length).toBe(11);
+    expect(list.filter((e) => e.label === null).length).toBe(10);
+
     const labeledInList = list.filter((e) => e.label !== null);
     expect(labeledInList.length).toBe(1);
     expect(labeledInList[0].id).toBe(labeled.id);
@@ -240,6 +242,66 @@ describe("AC4: listing and default-latest selection", () => {
     const src = makeSourceFile(dir);
     const store = openCheckpointStore(src, { now: fakeNow() });
     expect(store.latest()).toBeUndefined();
+  });
+});
+
+// --------------------------------------------------------------------------
+// AC2b: duplicate-label resolution (latest-wins)
+// --------------------------------------------------------------------------
+describe("AC2b: duplicate-label — get/delete resolve to latest", () => {
+  it("get(label) returns the entry with the highest seq when two share the same label", () => {
+    const dir = makeTmpDir();
+    const src = makeSourceFile(dir);
+    const store = openCheckpointStore(src, { now: fakeNow() });
+
+    const first = store.save(SCENE_A, { label: "before-refactor" });
+    const second = store.save(SCENE_B, { label: "before-refactor" });
+
+    const found = store.get("before-refactor");
+    expect(found).toBeDefined();
+    expect(found!.id).toBe(second.id);
+    expect(found!.seq).toBeGreaterThan(first.seq);
+  });
+
+  it("delete(label) removes the latest labeled entry and leaves the older one", () => {
+    const dir = makeTmpDir();
+    const src = makeSourceFile(dir);
+    const store = openCheckpointStore(src, { now: fakeNow() });
+
+    const first = store.save(SCENE_A, { label: "before-refactor" });
+    store.save(SCENE_B, { label: "before-refactor" });
+
+    store.delete("before-refactor");
+
+    // The older one must still exist by id
+    expect(store.get(first.id)).toBeDefined();
+    // But a label lookup now returns the only remaining one (the first/older)
+    const remaining = store.get("before-refactor");
+    expect(remaining).toBeDefined();
+    expect(remaining!.id).toBe(first.id);
+  });
+});
+
+// --------------------------------------------------------------------------
+// AC2c: failure-path — get/delete on nonexistent
+// --------------------------------------------------------------------------
+describe("AC2c: failure paths — nonexistent id/label", () => {
+  it("get('nonexistent-id') returns undefined", () => {
+    const dir = makeTmpDir();
+    const src = makeSourceFile(dir);
+    const store = openCheckpointStore(src, { now: fakeNow() });
+    store.save(SCENE_A);
+    expect(store.get("nonexistent-id")).toBeUndefined();
+  });
+
+  it("delete('nonexistent-id') does not throw and leaves the list unchanged", () => {
+    const dir = makeTmpDir();
+    const src = makeSourceFile(dir);
+    const store = openCheckpointStore(src, { now: fakeNow() });
+    store.save(SCENE_A);
+    const before = store.list().map((e) => e.id);
+    expect(() => store.delete("nonexistent-id")).not.toThrow();
+    expect(store.list().map((e) => e.id)).toEqual(before);
   });
 });
 

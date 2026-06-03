@@ -94,7 +94,7 @@ function prune(entries: CheckpointEntry[], dir: string): CheckpointEntry[] {
     if (removeIds.has(e.id)) {
       // Delete the scene file too
       const scenePath = path.join(dir, e.sceneFile);
-      if (fs.existsSync(scenePath)) fs.rmSync(scenePath);
+      fs.rmSync(scenePath, { force: true });
     } else {
       kept.push(e);
     }
@@ -159,23 +159,33 @@ export function openCheckpointStore(
     },
 
     latest(): CheckpointEntry | undefined {
-      if (entries.length === 0) return undefined;
-      return [...entries].sort((a, b) => b.seq - a.seq)[0];
+      return this.list()[0];
     },
 
     get(idOrLabel: string): CheckpointEntry | undefined {
-      return entries.find((e) => e.id === idOrLabel || (e.label !== null && e.label === idOrLabel));
+      // Exact id match first (ids are unique)
+      const byId = entries.find((e) => e.id === idOrLabel);
+      if (byId) return byId;
+      // Label match: return the one with the highest seq (latest-wins)
+      const byLabel = entries
+        .filter((e) => e.label !== null && e.label === idOrLabel)
+        .sort((a, b) => b.seq - a.seq)[0];
+      return byLabel;
     },
 
     delete(idOrLabel: string): void {
-      const entry = entries.find(
-        (e) => e.id === idOrLabel || (e.label !== null && e.label === idOrLabel),
-      );
+      // Exact id match first; otherwise resolve to latest-labeled entry
+      const byId = entries.find((e) => e.id === idOrLabel);
+      const entry =
+        byId ??
+        entries
+          .filter((e) => e.label !== null && e.label === idOrLabel)
+          .sort((a, b) => b.seq - a.seq)[0];
       if (!entry) return;
 
       // Remove scene file
       const scenePath = path.join(dir, entry.sceneFile);
-      if (fs.existsSync(scenePath)) fs.rmSync(scenePath);
+      fs.rmSync(scenePath, { force: true });
 
       entries = entries.filter((e) => e.id !== entry.id);
       persist();
