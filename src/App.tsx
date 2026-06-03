@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Excalidraw, CaptureUpdateAction, getSceneVersion } from "@excalidraw/excalidraw";
 import "@excalidraw/excalidraw/index.css";
 import { shouldPersistEdit, APP_STATE_WHITELIST } from "./writeback";
+import { flushPendingScene } from "./first-load";
 
 type ExcalidrawAPI = {
   updateScene: (sceneData: {
@@ -97,11 +98,13 @@ export default function App() {
   function handleExcalidrawAPI(api: ExcalidrawAPI) {
     apiRef.current = api;
     // A scene may have arrived over the wire before the API existed; flush it.
-    if (pendingSceneRef.current != null) {
-      const pending = pendingSceneRef.current;
-      pendingSceneRef.current = null;
-      applyScene(pending);
-    }
+    // flushPendingScene defers the apply one frame: the excalidrawAPI callback
+    // fires before Excalidraw commits its own initial (empty) scene, and a
+    // synchronous updateScene here would be clobbered by that empty commit,
+    // blanking the canvas on first load. See first-load.ts.
+    const pending = pendingSceneRef.current;
+    pendingSceneRef.current = null;
+    flushPendingScene(pending, applyScene);
   }
 
   // The human edited the canvas. Excalidraw fires onChange for pure noise too
