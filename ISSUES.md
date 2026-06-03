@@ -37,9 +37,9 @@ Make the app run with no network at runtime. Copy `node_modules/@excalidraw/exca
 
 ### Acceptance criteria
 
-- [ ] Fonts are served from the local `dist/`, not a CDN.
-- [ ] `EXCALIDRAW_ASSET_PATH` is set before the bundle loads.
-- [ ] With the network physically off, the page loads, fonts render, and no outbound requests are attempted (verify via devtools / a request interceptor).
+- [x] Fonts are served from the local `dist/`, not a CDN. (234 .woff2 across 9 families copied to dist/fonts/)
+- [x] `EXCALIDRAW_ASSET_PATH` is set before the bundle loads. (inline script precedes module script in index.html)
+- [~] With the network physically off, the page loads, fonts render, and no outbound requests are attempted. (no-CDN-URL grep test passes; live network-off trace deferred to slice-4 `/run` checkpoint)
 
 ---
 
