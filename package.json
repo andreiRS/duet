@@ -5,7 +5,8 @@
   "scripts": {
     "test": "bun test",
     "dev": "vite",
-    "build": "vite build"
+    "build": "vite build",
+    "duet": "bun run src/cli.ts"
   },
   "dependencies": {
     "@excalidraw/excalidraw": "0.18.1",
