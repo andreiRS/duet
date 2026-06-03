@@ -48,6 +48,9 @@ Not a renderer. It computes problems from coordinates, deterministically, withou
 
 ## Checkpoint
 
-A saved snapshot of the scene the [agent](#agent) could diff or restore against, borrowed from the Excalidraw MCP's terminology. Lets the agent tell its own past edits from the human's after losing context.
+A saved copy of the scene *state* the [agent](#agent) can compare or roll back against, borrowed from the Excalidraw MCP's terminology. Lets the agent tell its own past edits from the human's after losing context. Two uses:
 
-**Not part of v1** — the agent relies on its live context plus [deterministic ids](#deterministic-id) instead. Recorded here so the term has one meaning when it arrives.
+- **diff** — compare the current [source-of-truth file](#source-of-truth-file) against the checkpoint to see what the human changed, keyed by [deterministic id](#deterministic-id).
+- **restore** — return the file to the checkpoint to roll back a bad edit.
+
+A scene state, **not an image** — the agent never renders (see ADR-0003). Restore is last-writer-wins, consistent with [strict alternation](#strict-alternation).
