@@ -25,15 +25,11 @@ export interface BootstrapOptions {
   openBrowser?: (url: string) => void;
 }
 
-export interface BootstrapHandle extends ServerHandle {
-  // ServerHandle already has server, setScene, getScene
-}
-
-export async function bootstrap({
+export function bootstrap({
   filePath,
   port = 3000,
   openBrowser,
-}: BootstrapOptions): Promise<BootstrapHandle> {
+}: BootstrapOptions): ServerHandle {
   ensureScene(filePath);
   const scene = JSON.parse(fs.readFileSync(filePath, "utf8"));
   const handle = createServer({ port });

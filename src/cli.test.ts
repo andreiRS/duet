@@ -50,11 +50,11 @@ describe("ensureScene", () => {
 });
 
 describe("bootstrap", () => {
-  it("serves the empty scene after creating a missing file", async () => {
+  it("serves the empty scene after creating a missing file", () => {
     tmpDir = makeTmpDir();
     const filePath = path.join(tmpDir, "new.excalidraw");
 
-    const handle = await bootstrap({ filePath, port: 0, openBrowser: () => {} });
+    const handle = bootstrap({ filePath, port: 0, openBrowser: () => {} });
     servers.push(handle.server);
 
     const scene = handle.getScene();
@@ -64,7 +64,7 @@ describe("bootstrap", () => {
     expect((scene as any).elements.length).toBe(0);
   });
 
-  it("serves the existing scene deep-equal to what is on disk", async () => {
+  it("serves the existing scene deep-equal to what is on disk", () => {
     tmpDir = makeTmpDir();
     const filePath = path.join(tmpDir, "existing.excalidraw");
     const existingScene = {
@@ -77,18 +77,18 @@ describe("bootstrap", () => {
     };
     fs.writeFileSync(filePath, JSON.stringify(existingScene), "utf8");
 
-    const handle = await bootstrap({ filePath, port: 0, openBrowser: () => {} });
+    const handle = bootstrap({ filePath, port: 0, openBrowser: () => {} });
     servers.push(handle.server);
 
     expect(handle.getScene()).toEqual(existingScene);
   });
 
-  it("calls the browser opener exactly once with the server URL", async () => {
+  it("calls the browser opener exactly once with the server URL", () => {
     tmpDir = makeTmpDir();
     const filePath = path.join(tmpDir, "new.excalidraw");
     const openedUrls: string[] = [];
 
-    const handle = await bootstrap({
+    const handle = bootstrap({
       filePath,
       port: 0,
       openBrowser: (url) => { openedUrls.push(url); },
