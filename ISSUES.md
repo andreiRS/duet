@@ -168,7 +168,7 @@ Given a baseline scene and the current scene, classify each element by id (ADR-0
 
 ### Acceptance criteria
 
-- [ ] Moved / retyped / added / deleted are each correctly classified on a crafted before/after pair.
-- [ ] Diff ignores `version`/`versionNonce` changes (no false positives from no-op edits).
-- [ ] Elements with unknown ids are classified as human-added and preserved unchanged.
-- [ ] Applying the patch keeps a human's moved/renamed element at the human's value.
+- [x] Moved / retyped / added / deleted are each correctly classified on a crafted before/after pair.
+- [x] Diff ignores `version`/`versionNonce` changes (no false positives from no-op edits).
+- [x] Elements with unknown ids are classified as human-added and preserved unchanged.
+- [x] Applying the patch keeps a human's moved/renamed element at the human's value.
