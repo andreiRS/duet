@@ -55,10 +55,10 @@ A `Bun.serve` server (native, no hono/ws lib) that serves the built `dist/` and 
 
 ### Acceptance criteria
 
-- [ ] Server serves the built app over HTTP.
-- [ ] A browser tab opens a websocket and subscribes to `scene`.
-- [ ] On connect, the tab receives the current scene immediately.
-- [ ] A second tab also connects and receives updates (broadcast).
+- [x] Server serves the built app over HTTP. (`Bun.serve` static serve in `src/server.ts`; HTTP GET / + asset tests)
+- [x] A browser tab opens a websocket and subscribes to `scene`. (native Bun pub/sub `ws.subscribe("scene")`; proven via WS test clients)
+- [x] On connect, the tab receives the current scene immediately. (replay-on-connect in `websocket.open`; null + non-null replay tests)
+- [x] A second tab also connects and receives updates (broadcast). (two-client broadcast test on `setScene` → `server.publish`)
 
 ---
 
