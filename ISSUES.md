@@ -112,11 +112,12 @@ On the human's `onChange`, debounce 300–500ms and gate on `getSceneVersion` so
 
 ### Acceptance criteria
 
-- [ ] Dragging/typing in the browser writes the change to the file after the debounce.
-- [ ] Mouse-move/hover/selection alone never writes (version gate holds).
-- [ ] The file contains only `elements` + whitelisted `appState`; transient state is dropped.
-- [ ] Writes are atomic (no reader ever sees a half-written file).
-- [ ] Duet's own write-back does **not** trigger a push back to the browser (echo guard holds) — covered by an explicit test.
+- [x] Dragging/typing in the browser writes the change to the file after the debounce. (server `save` handler test; `/run` browser round-trip: drawn rectangle persists to disk)
+- [x] Mouse-move/hover/selection alone never writes (version gate holds). (`shouldPersist`/`shouldPersistEdit` unit tests; `getSceneVersion` gate in App.tsx)
+- [x] The file contains only `elements` + whitelisted `appState`; transient state is dropped. (`shapeSceneForFile` whitelist test; `/run` check: appState keys = viewBackgroundColor, gridSize, theme)
+- [x] Writes are atomic (no reader ever sees a half-written file). (`writeSceneFile` tmp+rename test; unique tmp path)
+- [x] Duet's own write-back does **not** trigger a push back to the browser (echo guard holds) — covered by an explicit test. (AC5 full-loop test: self-write → 0 broadcasts; external write → 1 broadcast)
+- Review fix-up `a8d7972`: fixed confirmed **reverse-bounce** (agent updates were rewritten into Duet's envelope — `updateScene` re-stamps versions; now an `isApplyingRemote` guard absorbs the post-apply onChange, verified by headless round-trip: agent source preserved, human edits still persist); version gate `>`→`!==` (don't drop a lower-version human edit); unique tmp path (no same-ms collision); bounded echo-guard registry (last 16, no stale-hash skip); extracted pure `shouldPersistEdit` for client-side test coverage.
 
 ---
 
