@@ -85,6 +85,70 @@ describe("watchScene", () => {
     expect(sceneCalls).toBe(0);
   });
 
+  it("survives an atomic tmp+rename write and fires onScene with the new scene", async () => {
+    tmpDir = makeTmpDir();
+    const filePath = path.join(tmpDir, "scene.excalidraw");
+    fs.writeFileSync(filePath, JSON.stringify({ elements: [], appState: {} }), "utf8");
+
+    const waiter = waitForScene();
+    const handle = watchScene(filePath, { onScene: waiter.onScene });
+    watchers.push(handle);
+    await handle.ready;
+
+    // Atomic write: a temp file renamed over the target. Some platforms keep
+    // the change event; others fire unlink+add and lose the single-file watch.
+    // We exercise the unlink+recreate shape explicitly so the gap reproduces
+    // regardless of platform: a change-only single-file watcher never sees the
+    // recreated file and silently freezes.
+    const newScene = { elements: [{ id: "atomic", type: "ellipse" }], appState: { zoom: 2 } };
+    const tmpFile = path.join(tmpDir, "scene.excalidraw.tmp");
+    fs.unlinkSync(filePath);
+    // Let the unlink register before the file reappears, so the recreate
+    // surfaces as an `add` rather than coalescing into a `change`. This is the
+    // case a change-only single-file watcher misses.
+    await new Promise((r) => setTimeout(r, 300));
+    fs.writeFileSync(tmpFile, JSON.stringify(newScene), "utf8");
+    fs.renameSync(tmpFile, filePath);
+
+    const received = await waiter.promise;
+    expect(received).toEqual(newScene);
+  });
+
+  it("routes a watcher error to onError without throwing", () => {
+    tmpDir = makeTmpDir();
+    const filePath = path.join(tmpDir, "scene.excalidraw");
+    fs.writeFileSync(filePath, JSON.stringify({ elements: [], appState: {} }), "utf8");
+
+    // Inject a tiny EventEmitter-shaped watcher so we can emit an error on the
+    // same surface chokidar uses. With no error listener this would throw an
+    // uncaught exception; watchScene must catch it and route to onError.
+    const listeners = new Map<string, ((...args: unknown[]) => void)[]>();
+    const fakeWatcher = {
+      on(event: string, listener: (...args: unknown[]) => void) {
+        const arr = listeners.get(event) ?? [];
+        arr.push(listener);
+        listeners.set(event, arr);
+        return fakeWatcher;
+      },
+      emit(event: string, ...args: unknown[]) {
+        for (const l of listeners.get(event) ?? []) l(...args);
+      },
+      close: async () => {},
+    };
+
+    let received: unknown;
+    const handle = watchScene(
+      filePath,
+      { onScene: () => {}, onError: (err) => { received = err; } },
+      { createWatcher: () => fakeWatcher },
+    );
+    watchers.push(handle);
+
+    const fakeError = new Error("EPERM: simulated watcher failure");
+    expect(() => fakeWatcher.emit("error", fakeError)).not.toThrow();
+    expect(received).toBe(fakeError);
+  });
+
   it("recovers on the next valid write after a malformed one", async () => {
     tmpDir = makeTmpDir();
     const filePath = path.join(tmpDir, "scene.excalidraw");
