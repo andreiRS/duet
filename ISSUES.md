@@ -19,7 +19,7 @@ A Vite 8 + `@vitejs/plugin-react` app (React 19) that mounts `@excalidraw/excali
 ### Acceptance criteria
 
 - [x] `bun run build` produces a static `dist/` with hashed chunks.
-- [~] Opening the built page shows an editable Excalidraw canvas. (source mounts `<Excalidraw/>` + bundle contains it + page serves; pixel-level confirmation deferred to slice-4 `/run` checkpoint)
+- [x] Opening the built page shows an editable Excalidraw canvas. (confirmed at slice-4 `/run` checkpoint: headless Chromium loads the served bundle, full Excalidraw editor + canvas render, 0 console/page errors)
 - [x] Build target is `es2022` for both `build.target` and `optimizeDeps.esbuildOptions.target`.
 - [x] Pinned versions recorded in `package.json` (`bun pm view` to confirm latest at install).
 
@@ -39,7 +39,7 @@ Make the app run with no network at runtime. Copy `node_modules/@excalidraw/exca
 
 - [x] Fonts are served from the local `dist/`, not a CDN. (234 .woff2 across 9 families copied to dist/fonts/)
 - [x] `EXCALIDRAW_ASSET_PATH` is set before the bundle loads. (inline script precedes module script in index.html)
-- [~] With the network physically off, the page loads, fonts render, and no outbound requests are attempted. (no-CDN-URL grep test passes; live network-off trace deferred to slice-4 `/run` checkpoint)
+- [x] With the network physically off, the page loads, fonts render, and no outbound requests are attempted. (confirmed at slice-4 `/run` checkpoint: headless Chromium network trace = 12 requests, all localhost, 0 external, 0 failed; hand-drawn font renders from local dist/)
 
 ---
 
@@ -74,9 +74,9 @@ A CLI entry that takes the target file path as an argument, creates it as an emp
 
 ### Acceptance criteria
 
-- [ ] `duet ./scene.excalidraw` on a missing file creates a valid empty scene and opens the browser showing a blank canvas.
-- [ ] `duet ./existing.excalidraw` opens the browser showing the existing scene.
-- [ ] The path the agent writes to is the same path Duet serves.
+- [x] `duet ./scene.excalidraw` on a missing file creates a valid empty scene and opens the browser showing a blank canvas. (`ensureScene` + bootstrap tests; `/run` checkpoint: blank canvas renders)
+- [x] `duet ./existing.excalidraw` opens the browser showing the existing scene. (`/run` checkpoint: served rect+text scene renders via WS replay → `updateScene`)
+- [x] The path the agent writes to is the same path Duet serves. (bootstrap reads the file → `setScene`; `getScene` deep-equals on-disk scene test)
 
 ---
 
