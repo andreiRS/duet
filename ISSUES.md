@@ -92,10 +92,11 @@ Watch the target file with chokidar 4 (`awaitWriteFinish: { stabilityThreshold: 
 
 ### Acceptance criteria
 
-- [ ] Editing the file on disk updates the browser canvas with no click.
-- [ ] Live updates use `updateScene`, preserving the canvas (no full remount flicker).
-- [ ] A malformed/partial file read leaves the last good scene on screen and logs a warning; the next valid write recovers.
-- [ ] The "Agent updated the canvas" flash appears on each external change.
+- [x] Editing the file on disk updates the browser canvas with no click. (`src/watch.ts` chokidar; integration test: file write → WS broadcast; `/run` browser check: live render after edit)
+- [x] Live updates use `updateScene`, preserving the canvas (no full remount flicker). (App.tsx applies `updateScene({elements, appState, captureUpdate: NEVER})` via WS, no remount; verified visually)
+- [x] A malformed/partial file read leaves the last good scene on screen and logs a warning; the next valid write recovers. (watch.ts parse-guard; unit + integration tests for keep-last-good + recovery)
+- [x] The "Agent updated the canvas" flash appears on each external change. (`/run` browser check: flash visible after on-disk edit, incl. atomic tmp+rename)
+- Review fix-up `30cb19a`: chokidar `error` events routed to `onError` (no crash); watcher now watches the parent dir + handles `add`+`change` so **atomic tmp+rename writes are caught** (real RED test — de-risks slice 6); WS moved into a mount-once `useEffect` with cleanup (no socket leak / duplicate flash); flash timer cleared on unmount.
 
 ---
 
