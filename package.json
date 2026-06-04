@@ -2,6 +2,9 @@
   "name": "duet",
   "version": "0.1.0",
   "type": "module",
+  "bin": {
+    "duet": "./src/cli.ts"
+  },
   "scripts": {
     "test": "bun test",
     "dev": "vite",
