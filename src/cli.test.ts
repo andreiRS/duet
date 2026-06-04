@@ -195,7 +195,7 @@ function collectScenes(ws: WebSocket): { scenes: any[] } {
 }
 
 describe("browser write-back echo guard (full loop)", () => {
-  it("a browser save writes the file but does NOT bounce back as a scene broadcast; an external write DOES", async () => {
+  it("a browser save writes the file and broadcasts the merged scene exactly once (echo guard suppresses the watcher's duplicate); an external write DOES broadcast", async () => {
     tmpDir = makeTmpDir();
     const filePath = path.join(tmpDir, "loop.excalidraw");
 
@@ -225,19 +225,23 @@ describe("browser write-back echo guard (full loop)", () => {
       await new Promise((r) => setTimeout(r, 20));
     }
     expect(written.elements).toEqual(drawn);
-    // Bounded wait for any (wrongful) echo broadcast to arrive.
+    // ADR-0007: the server broadcasts the MERGED scene to ALL tabs including the
+    // sender (one direct server.publish). The echo guard still suppresses the
+    // SECOND broadcast that the watcher would otherwise emit from this write's
+    // file event — so the sender sees exactly ONE scene message, not a storm.
     await new Promise((r) => setTimeout(r, 800));
-    expect(collector.scenes.length).toBe(0); // echo guard held: no self-bounce
+    expect(collector.scenes.length).toBe(1); // exactly one: the merged broadcast
+    expect((collector.scenes[0] as any).elements).toEqual(drawn);
 
-    // 2. External (agent) write with DIFFERENT bytes → must broadcast.
+    // 2. External (agent) write with DIFFERENT bytes → must broadcast (a second).
     const agentScene = { type: "excalidraw", version: 2, elements: [{ id: "by-agent" }], appState: {}, files: {} };
     fs.writeFileSync(filePath, JSON.stringify(agentScene), "utf8");
     for (let i = 0; i < 150; i++) {
-      if (collector.scenes.length > 0) break;
+      if (collector.scenes.length > 1) break;
       await new Promise((r) => setTimeout(r, 20));
     }
-    expect(collector.scenes.length).toBe(1);
-    expect(collector.scenes[0]).toEqual(agentScene);
+    expect(collector.scenes.length).toBe(2);
+    expect(collector.scenes[1]).toEqual(agentScene);
   });
 });
 

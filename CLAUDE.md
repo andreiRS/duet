@@ -44,10 +44,15 @@ running there, so it cannot test sync. Always test sync through `bun run duet`.
 ## Sync invariants (do not regress)
 
 - **Atomic writes** — temp-file + rename, never a bare `writeFile`.
-- **Echo guard** — a browser save must not bounce back to the tab that made it.
-  It must still fan out to the *other* tabs (`ws.publish` excludes the sender).
+- **Echo guard** — records the bytes Duet writes so the *watcher* skips the file
+  event of our own write (no duplicate broadcast). Loop-prevention on the sender
+  is the client's `isApplyingRemote` guard, NOT withholding data: a browser save
+  re-reads + merges on disk and broadcasts the merged scene to **all** tabs
+  including the sender (`server.publish`, not `ws.publish`), so the sender sees
+  the reconciled truth (ADR-0007).
 - **Agent path vs browser path** — agent edits flow file → watcher → broadcast;
-  browser edits flow WS save → write → `ws.publish`. Keep both working.
+  browser edits flow WS save → re-read + `mergeById` → write → `server.publish`
+  (all tabs). Keep both working.
 - **First-load buffer** — render existing file content immediately on connect,
   no flash on the initial load (only on later agent edits).
 - **appState whitelist** is the single source of truth, shared client + server

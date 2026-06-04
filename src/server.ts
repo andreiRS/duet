@@ -1,6 +1,8 @@
 import * as path from "path";
 import * as fs from "fs";
 import { EchoGuard, writeSceneFile } from "./writeback";
+import { readSceneFile, elementsOf } from "./scene-io";
+import { mergeById, type El } from "./reconcile";
 
 export type Scene = Record<string, unknown> | null;
 
@@ -22,6 +24,21 @@ export interface ServerOptions {
 
 function sceneMsg(scene: Scene): string {
   return JSON.stringify({ type: "scene", scene });
+}
+
+// Re-read the current on-disk elements for the browser-save merge. If the file
+// does not exist yet, disk is empty (mergeById([], incoming) preserves today's
+// "write the incoming scene" behavior). On a malformed/unreadable read, log and
+// fall back to empty disk so a bad on-disk file degrades to writing the incoming
+// scene rather than crashing the WS handler (matches its try/catch tolerance).
+function readDiskElements(filePath: string): El[] {
+  if (!fs.existsSync(filePath)) return [];
+  try {
+    return elementsOf(readSceneFile(filePath));
+  } catch (err) {
+    console.warn(`duet: could not re-read ${filePath} for merge, writing incoming scene as-is:`, err);
+    return [];
+  }
 }
 
 function isFile(filePath: string): boolean {
@@ -89,13 +106,23 @@ export function createServer({
             appState?: Record<string, unknown> | null;
           };
           try {
-            const shaped = writeSceneFile(filePath, { elements, appState }, echoGuard);
+            // Reverse-race fix (ADR-0007, #17): the browser save is a stale,
+            // 400ms-debounced full-scene snapshot. Re-read the current on-disk
+            // elements and merge the incoming ones by id, so an element the
+            // agent wrote during the debounce window is KEPT instead of blindly
+            // overwritten. Only `elements` are merged; appState stays
+            // whole-value/whitelisted via writeSceneFile.
+            const incoming: El[] = Array.isArray(elements) ? (elements as El[]) : [];
+            const merged = mergeById(readDiskElements(filePath), incoming);
+            const shaped = writeSceneFile(filePath, { elements: merged, appState }, echoGuard);
             currentScene = shaped as unknown as Scene;
-            // Fan out the human's edit to OTHER clients. The echo guard makes the
-            // watcher skip the file event this write triggers, so without this
-            // publish the edit never reaches other tabs until they reconnect
-            // (bug B1). ws.publish excludes the sender, so this tab does not bounce.
-            ws.publish("scene", sceneMsg(currentScene));
+            // Broadcast the MERGED scene to ALL tabs INCLUDING the sender
+            // (ADR-0007). The merge can differ from what the sender sent (it
+            // gains the agent's concurrent element), so the sender must see the
+            // reconciled truth. server.publish reaches every subscriber;
+            // ws.publish would exclude the sender. No save-loop: the client's
+            // isApplyingRemote guard absorbs the resulting onChange.
+            server.publish("scene", sceneMsg(currentScene));
           } catch (err) {
             console.warn(`duet: failed to persist browser edit to ${filePath}:`, err);
           }
