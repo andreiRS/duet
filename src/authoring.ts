@@ -195,8 +195,8 @@ export function makeVerbs(els: El[], opts: { dark?: boolean } = {}): Verbs {
   const pushArrowLabel = (
     arrowEl: El,
     startX: number,
-    endX: number,
     startY: number,
+    endX: number,
     endY: number,
     label: string,
     color: string,
@@ -247,7 +247,7 @@ export function makeVerbs(els: El[], opts: { dark?: boolean } = {}): Verbs {
       endBinding: null,
     });
     if (label) {
-      pushArrowLabel(e, x, x + width, y, y + height, label, color);
+      pushArrowLabel(e, x, y, x + width, y + height, label, color);
     } else {
       els.push(e);
     }
