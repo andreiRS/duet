@@ -105,6 +105,48 @@ describe("WebSocket replay-on-connect", () => {
   });
 });
 
+// ─── #25: multiline bound labels are normalized before the browser sees them ──
+describe("WebSocket scene normalization (#25)", () => {
+  it("corrects a clipped multiline bound label on replay", async () => {
+    const dir = setup();
+    const { server, setScene, getScene } = createServer({ port: 0, distDir: dir });
+    addCleanup(() => server.stop(true));
+
+    // A box whose two-line label was persisted with a single-line height (22.5).
+    setScene({
+      elements: [
+        { id: "box", type: "rectangle", x: 0, y: 120, width: 200, height: 80 },
+        {
+          id: "box_t",
+          type: "text",
+          x: 10,
+          y: 151,
+          width: 180,
+          height: 22.5,
+          text: "Your App\n(REST calls)",
+          fontSize: 18,
+          lineHeight: 1.25,
+          verticalAlign: "middle",
+          containerId: "box",
+        },
+      ],
+      appState: {},
+    });
+
+    const ws = new WebSocket(`ws://localhost:${server.port}/`);
+    addCleanup(() => ws.close());
+    await wsOpen(ws);
+    const msg = (await nextMessage(ws)) as { scene: { elements: { id: string; height: number }[] } };
+
+    const label = msg.scene.elements.find((e) => e.id === "box_t")!;
+    expect(label.height).toBe(45);
+
+    // getScene returns the same normalized scene the broadcast uses.
+    const stored = getScene() as { elements: { id: string; height: number }[] };
+    expect(stored.elements.find((e) => e.id === "box_t")!.height).toBe(45);
+  });
+});
+
 // ─── Behavior 4: broadcast to all connected clients on setScene ──────────────
 
 describe("WebSocket broadcast", () => {

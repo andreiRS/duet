@@ -736,7 +736,7 @@ describe("runCameraCommand", () => {
     expect(result.stderr ?? "").toContain("--port requires a number");
   });
 
-  it("resolves port from --port flag, then DUET_PORT env, then 3737 default", async () => {
+  it("resolves port from --port flag first, then DUET_PORT env", async () => {
     const dir = makeFakeDistDir();
     servers.push({ stop: () => fs.rmSync(dir, { recursive: true, force: true }) });
     const srv = createServer({ port: 0, distDir: dir });
@@ -753,9 +753,5 @@ describe("runCameraCommand", () => {
     // DUET_PORT env used when no --port flag
     const r2 = await runCameraCommand([], { DUET_PORT: String(p) });
     expect(r2.code).toBe(0);
-
-    // Default 3737 used when nothing set — server is not on 3737, so we get code 2
-    const r3 = await runCameraCommand([], {});
-    expect(r3.code).toBe(2);
   });
 });

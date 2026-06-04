@@ -35,6 +35,34 @@ describe("labeledRect produces two bound elements", () => {
   });
 });
 
+// #25: a multiline labeledRect must size and place its bound text so every line
+// is contained, not just the first.
+describe("labeledRect contains a multiline label", () => {
+  test("bound text height is measured for all lines, not just the first", () => {
+    const s = scene();
+    // fontSize 18 → one line is 22.5, the two-line label must be 45 tall.
+    s.labeledRect("box1", 0, 0, 200, 80, PALETTE.light.blue, "Line one\nLine two", 18);
+    const textEl = s.build().elements.find((e) => e.id === "box1_t")!;
+    expect(textEl.height).toBe(45);
+  });
+
+  test("bound text is vertically centered within the box", () => {
+    const s = scene();
+    s.labeledRect("box1", 0, 120, 200, 80, PALETTE.light.blue, "Line one\nLine two", 18);
+    const textEl = s.build().elements.find((e) => e.id === "box1_t")!;
+    // box y=120 h=80, text h=45 → y = 120 + (80 − 45) / 2 = 137.5
+    expect(textEl.y).toBe(137.5);
+  });
+
+  test("box grows when it is too short to hold the label", () => {
+    const s = scene();
+    s.labeledRect("box1", 0, 0, 200, 40, PALETTE.light.blue, "Line one\nLine two", 18);
+    const rect = s.build().elements.find((e) => e.id === "box1")!;
+    // usable inner height 40 − 10 = 30 < 45, so grow to 45 + padding(10) = 55
+    expect(rect.height).toBe(55);
+  });
+});
+
 // AC3: element ids are deterministic — same inputs produce same ids every time
 describe("element ids are deterministic", () => {
   test("box id matches what was passed in", () => {
