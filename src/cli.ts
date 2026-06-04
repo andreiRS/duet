@@ -3,6 +3,7 @@ import * as fs from "fs";
 import { createServer, type ServerHandle, type Scene } from "./server";
 import { watchScene, type WatchHandle } from "./watch";
 import { EchoGuard, hashContent, type ShapedScene } from "./writeback";
+import { readSceneFile, elementsOf } from "./scene-io";
 
 // Default animation duration for camera fit (ms). Tuned to 400ms in #24.
 // Keep in sync with CAMERA_DEFAULT_DURATION_MS (camera.ts), the browser-side
@@ -208,13 +209,13 @@ export function runLs(
   if (!filePath) {
     return { code: 1, stderr: "duet: ls needs a file path, e.g. `duet ls ./scene.excalidraw`" };
   }
-  let scene: any;
+  let scene: { elements?: unknown };
   try {
-    scene = JSON.parse(fs.readFileSync(filePath, "utf8"));
+    scene = readSceneFile(filePath);
   } catch {
     return { code: 1, stderr: `duet: could not read ${filePath} — is it a valid .excalidraw file?` };
   }
-  const elements = (scene.elements ?? []) as any[];
+  const elements = elementsOf(scene);
   const textById = new Map<string, any>(
     elements.filter((el) => el.type === "text").map((el) => [el.id, el]),
   );
