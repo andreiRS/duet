@@ -54,9 +54,9 @@ interface Rect {
 
 // ---- label-width estimation ----
 // Shared heuristic used at CHECK TIME for bound-text overflow detection.
-// The 0.55 factor matches what authoring.ts uses for standalone text, and is
-// good enough as a validation proxy. Stored bound-text widths are always 0
-// (Excalidraw re-measures them on load), so we CANNOT trust label.width here.
+// The 0.55 factor matches what authoring.ts uses for all text (standalone and
+// bound). Geometry checks re-estimate at check time rather than trusting the
+// stored width, so they remain accurate even if the stored value differs.
 const CHAR_WIDTH_FACTOR = 0.55;
 function estimateLabelWidth(text: string, fontSize: number): number {
   return text.length * fontSize * CHAR_WIDTH_FACTOR;
@@ -109,8 +109,8 @@ function detect(els: El[]): Violation[] {
   const boxes = els.filter(isBox);
 
   // 1. Label wider than box: a bound text whose estimated width exceeds its
-  //    container box. We measure at check time rather than trusting the stored
-  //    width (which is 0 for bound labels, since Excalidraw re-measures on load).
+  //    container box. We re-estimate at check time for consistency; the stored
+  //    width is also a 0.55 estimate but may have been computed at authoring time.
   for (const box of boxes) {
     const label = els.find((e) => e.type === "text" && e.containerId === box.id);
     if (label) {
@@ -258,8 +258,8 @@ function applyFix(els: El[], v: Violation): boolean {
   const byId = (id: string) => els.find((e) => e.id === id);
   switch (v.type) {
     case "label-wider-than-box": {
-      // widen the box to fit the label, measuring width at fix time (same
-      // heuristic as detection; stored label.width is 0 for bound labels)
+      // widen the box to fit the label, re-estimating width at fix time
+      // (same 0.55 heuristic as detection; re-computed for consistency)
       const box = byId(v.ids[0]);
       if (!box) return false;
       const label = els.find((e) => e.type === "text" && e.containerId === box.id);

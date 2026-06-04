@@ -101,9 +101,10 @@ describe("build() returns valid Excalidraw JSON", () => {
   });
 });
 
-// Issue #9: bound labels must not carry a hand-computed 0.55-derived width
-describe("bound-label width is NOT the 0.55 heuristic", () => {
-  test("labeledRect bound text width is 0 (not length*fontSize*0.55)", () => {
+// Issue #14: bound labels must carry a non-zero width estimate (0.55 factor)
+// so Excalidraw renders them as legible text instead of scrambled tiny glyphs.
+describe("bound-label width uses 0.55 estimate (issue #14)", () => {
+  test("labeledRect bound text width equals label.length * fontSize * 0.55", () => {
     const s = scene();
     const label = "Hello World";
     const fontSize = 16;
@@ -111,23 +112,48 @@ describe("bound-label width is NOT the 0.55 heuristic", () => {
     const { elements } = s.build();
     const textEl = elements.find((e) => e.id === "box1_t");
     expect(textEl).toBeDefined();
-    // 0.55-derived width: 11 * 16 * 0.55 = 96.8
-    const derivedWidth = label.length * fontSize * 0.55;
-    expect(textEl!.width).not.toBeCloseTo(derivedWidth, 0);
-    expect(textEl!.width).toBe(0);
+    const expectedWidth = label.length * fontSize * 0.55;
+    expect(textEl!.width).toBeCloseTo(expectedWidth, 5);
   });
 
-  test("arrow label bound text width is 0 (not length*fontSize*0.55)", () => {
+  test("labeledRect bound text x is centered in the box: x + (boxWidth - labelWidth) / 2", () => {
+    const s = scene();
+    const label = "Hello World";
+    const fontSize = 16;
+    const boxX = 50;
+    const boxWidth = 200;
+    s.labeledRect("box1", boxX, 0, boxWidth, 80, PALETTE.light.blue, label, fontSize);
+    const { elements } = s.build();
+    const textEl = elements.find((e) => e.id === "box1_t");
+    expect(textEl).toBeDefined();
+    const labelWidth = label.length * fontSize * 0.55;
+    const expectedX = boxX + (boxWidth - labelWidth) / 2;
+    expect(textEl!.x).toBeCloseTo(expectedX, 5);
+  });
+
+  test("arrow label bound text width equals label.length * 14 * 0.55", () => {
     const s = scene();
     const label = "calls";
     s.arrow("a1", 0, 0, [[0, 0], [100, 0]], "#000000", label);
     const { elements } = s.build();
     const textEl = elements.find((e) => e.id === "a1_t");
     expect(textEl).toBeDefined();
-    // 0.55-derived width: 5 * 14 * 0.55 = 38.5
-    const derivedWidth = label.length * 14 * 0.55;
-    expect(textEl!.width).not.toBeCloseTo(derivedWidth, 0);
-    expect(textEl!.width).toBe(0);
+    const expectedWidth = label.length * 14 * 0.55;
+    expect(textEl!.width).toBeCloseTo(expectedWidth, 5);
+  });
+
+  test("arrow label bound text x is centered on the arrow midpoint: midX - labelWidth / 2", () => {
+    const s = scene();
+    const label = "calls";
+    // arrow from x=10 going to x=10+100=110; midX=60
+    s.arrow("a1", 10, 0, [[0, 0], [100, 0]], "#000000", label);
+    const { elements } = s.build();
+    const textEl = elements.find((e) => e.id === "a1_t");
+    expect(textEl).toBeDefined();
+    const labelWidth = label.length * 14 * 0.55;
+    const midX = 10 + (100 - 0) / 2; // x1 + (x2 - x1) / 2
+    const expectedX = midX - labelWidth / 2;
+    expect(textEl!.x).toBeCloseTo(expectedX, 5);
   });
 
   test("standalone text() KEEPS its 0.55-derived width (unchanged)", () => {
