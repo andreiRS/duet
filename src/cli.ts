@@ -8,6 +8,39 @@ import { EchoGuard, hashContent, type ShapedScene } from "./writeback";
 // fallback for a non-CLI POST.
 const CAMERA_FIT_DURATION_MS = 400;
 
+// Usage text for `duet --help`. Kept here (not a man page) so an agent can
+// discover the camera command and its flags from the CLI alone.
+export const HELP = `Duet — live two-way sync of one .excalidraw file between an agent and the browser.
+
+Usage:
+  duet <file.excalidraw>        Start the sync server (HTTP + WebSocket + file watch)
+                                and open the scene in your browser. The file is the
+                                source of truth; edits on disk and in the browser stay
+                                in sync. Edit the file directly to drive the canvas.
+  duet camera [options]         Move the browser camera in every connected tab.
+  duet --help                   Show this help.
+
+Options:
+  --port <n>                    Port for the server / camera client
+                                (default 3737, or the DUET_PORT env var).
+
+camera options:
+  --to <id1,id2,...>            Fit (zoom + center) the view to these element ids.
+                                Omit to fit the whole scene. ids are the "id" fields
+                                of elements in the .excalidraw file.
+  --no-animate                  Jump instantly instead of animating the move.
+
+camera output (stdout, JSON):
+  {"framed":<n>}                <n> = tabs that moved. 0 tabs => exits 0 with a
+                                "0 tabs connected" note on stderr.
+
+Examples:
+  duet ./scene.excalidraw
+  duet camera                                   # fit the whole scene
+  duet camera --to aB3xK9,Qz7Lm2                # zoom to two elements
+  duet camera --to aB3xK9 --no-animate          # snap, no animation
+`;
+
 export interface CameraResult {
   code: 0 | 1 | 2;
   stdout?: string;
@@ -159,19 +192,31 @@ export function bootstrap({
   };
 }
 
+const isHelpFlag = (a: string | undefined): boolean =>
+  a === "--help" || a === "-h" || a === "help";
+
 if (import.meta.main) {
-  if (process.argv[2] === "camera") {
+  const argv = process.argv.slice(2);
+
+  // `duet --help`, `duet -h`, `duet help`, or bare `duet camera --help`.
+  if (isHelpFlag(argv[0]) || (argv[0] === "camera" && argv.some(isHelpFlag))) {
+    process.stdout.write(HELP);
+    process.exit(0);
+  }
+
+  if (argv[0] === "camera") {
     // Short-lived POST client — boots no server, no watcher
-    const cameraArgv = process.argv.slice(3); // args after "camera"
+    const cameraArgv = argv.slice(1); // args after "camera"
     const result = await runCameraCommand(cameraArgv, process.env as Record<string, string | undefined>);
     if (result.stdout) process.stdout.write(result.stdout + "\n");
     if (result.stderr) process.stderr.write(result.stderr + "\n");
     process.exit(result.code);
   }
 
-  const filePath = process.argv[2];
+  const filePath = argv[0];
   if (!filePath) {
-    console.error("Usage: duet <path-to-scene.excalidraw>");
+    // No file and no command: show help so an agent learns the commands.
+    process.stderr.write(HELP);
     process.exit(1);
   }
   bootstrap({
