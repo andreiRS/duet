@@ -110,7 +110,7 @@ export async function runCameraCommand(
   } catch {
     return {
       code: 2,
-      stderr: `duet: no server on localhost:${port} — start one with \`duet <file>\``,
+      stderr: `duet: no server on localhost:${port} — start one with \`duet serve <file>\``,
     };
   }
 
@@ -277,7 +277,7 @@ if (import.meta.main) {
     // Port precedence: --port flag > DUET_PORT env > 3737 default.
     const portRaw = portArg ?? process.env.DUET_PORT ?? "3737";
     const port = Number(portRaw);
-    if (!Number.isInteger(port) || port < 0) {
+    if (!Number.isInteger(port) || port <= 0) {
       process.stderr.write("duet: --port requires a number\n");
       process.exit(1);
     }
