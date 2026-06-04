@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
-import { Excalidraw, CaptureUpdateAction, getSceneVersion } from "@excalidraw/excalidraw";
+import { Excalidraw, CaptureUpdateAction } from "@excalidraw/excalidraw";
 import "@excalidraw/excalidraw/index.css";
-import { shouldPersistEdit, APP_STATE_WHITELIST } from "./writeback";
+import { shouldPersistEdit, sceneVersion, APP_STATE_WHITELIST } from "./writeback";
 import { flushPendingScene } from "./first-load";
 import { mergeRemoteScene } from "./client-merge";
 import type { El } from "./reconcile";
@@ -114,8 +114,14 @@ export default function App() {
     // human edit still advances the gate, and only then stop absorbing.
     requestAnimationFrame(() => {
       requestAnimationFrame(() => {
-        const applied = apiRef.current?.getSceneElements() ?? elements;
-        lastVersionRef.current = getSceneVersion(applied as never);
+        // Record the baseline over the SAME set Excalidraw reports to onChange:
+        // the INCLUDING-DELETED elements. getSceneElements() strips tombstones,
+        // so a scene with any deleted element left the baseline short by that
+        // element's version while onChange counted it — a permanent phantom
+        // delta that bounced a no-op save every apply (endless agent-update
+        // loop). See writeback.sceneVersion + writeback.test.ts.
+        const applied = apiRef.current?.getSceneElementsIncludingDeleted() ?? elements;
+        lastVersionRef.current = sceneVersion(applied as never);
         isApplyingRemoteRef.current = false;
       });
     });
@@ -145,7 +151,7 @@ export default function App() {
     elements: readonly unknown[],
     appState: Record<string, unknown>,
   ) {
-    const nextVersion = getSceneVersion(elements as never);
+    const nextVersion = sceneVersion(elements as never);
     if (
       !shouldPersistEdit({
         isApplyingRemote: isApplyingRemoteRef.current,
