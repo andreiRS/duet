@@ -2,7 +2,7 @@ import { describe, it, expect, afterEach } from "bun:test";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
-import { ensureScene, bootstrap, runCameraCommand } from "./cli";
+import { ensureScene, bootstrap, runCameraCommand, HELP } from "./cli";
 import { createServer } from "./server";
 import { open } from "./open";
 
@@ -286,6 +286,31 @@ function makeFakeDistDir(): string {
   fs.writeFileSync(path.join(dir, "index.html"), "<html><body>duet</body></html>");
   return dir;
 }
+
+describe("HELP", () => {
+  it("documents the camera command and its discovery-critical flags", () => {
+    // An agent reads --help to learn how to drive the camera, so the text
+    // must name the command and the flags it needs.
+    expect(HELP).toContain("duet camera");
+    expect(HELP).toContain("--to");
+    expect(HELP).toContain("--no-animate");
+    expect(HELP).toContain("--port");
+    expect(HELP).toContain("framed");
+  });
+
+  it("is printed by the binary for --help on stdout, exit 0", async () => {
+    const proc = Bun.spawn(["bun", "run", "src/cli.ts", "--help"], {
+      cwd: process.cwd(),
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    const out = await new Response(proc.stdout).text();
+    const code = await proc.exited;
+    expect(code).toBe(0);
+    expect(out).toContain("duet camera");
+    expect(out).toContain("--to");
+  });
+});
 
 describe("runCameraCommand", () => {
   it("returns code 0 with {framed:N} on stdout when server has elements and tabs", async () => {
