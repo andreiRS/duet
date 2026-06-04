@@ -40,6 +40,18 @@ A label that survives in Excalidraw JSON only as a **separate text element** lin
 
 A box's label is therefore two elements, not one. Both ids and the binding survive the edit round-trip.
 
+## Camera command
+
+An ephemeral instruction from the [agent](#agent) to move the [human](#human)'s viewport: fit the whole scene, or frame a named set of elements. It changes what the human *sees*, never what the scene *is*.
+
+Deliberately **not** part of the [source-of-truth file](#source-of-truth-file): it is an imperative "do this once" verb, not durable state, so it travels out of band (agent to Duet to the browser) rather than through the file. View is per-tab and transient; scene content is shared and authoritative. See ADR-0005. This is the one channel where the agent talks to Duet, the narrow exception to [handoff](#handoff)-by-file.
+
+## Core
+
+The single scene-edit library both the [agent](#agent) and any future tooling (CLI, MCP) use to touch the [source-of-truth file](#source-of-truth-file): load-or-create, query by id, author elements, and atomically save. One place that owns scene structure, so the logic is never re-hand-rolled per edit.
+
+Distinct from Duet the server: the core reads and writes the *file*, it does not bridge to the browser. It is pure file work and runs with the server down. Camera and rendering are deliberately outside it (see [camera command](#camera-command); rendering is not the core's job, see ADR-0003). See ADR-0006 for why the core is a fluent mutate-in-place object rather than a functional one.
+
 ## Geometry check
 
 The pure-geometry validation the [agent](#agent) runs before every write, standing in for the eyes it does not have. Checks: label wider than box, box overlap, arrow endpoint misses target edge, off-canvas, spacing below the minimum. Mechanical violations are auto-fixed; structural ones are reconsidered. The agent never hands over a scene with a known violation.
