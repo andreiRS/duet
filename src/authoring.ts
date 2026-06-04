@@ -32,12 +32,10 @@ export const PALETTE = {
 
 export type Family = readonly [string, string, string];
 
-export function scene(opts: { dark?: boolean } = {}) {
-  const DARK = !!opts.dark;
-  const ink = DARK ? "#e5e5e5" : "#1e1e1e";
-  const els: El[] = [];
-
-  const base = (e: El): El => ({
+// The default element envelope shared by every verb and by scene()'s build().
+// Caller-supplied fields in `e` win via spread.
+function baseEl(ink: string, e: El): El {
+  return {
     angle: 0,
     backgroundColor: "transparent",
     fillStyle: "solid",
@@ -58,7 +56,41 @@ export function scene(opts: { dark?: boolean } = {}) {
     locked: false,
     strokeColor: ink,
     ...e,
-  });
+  };
+}
+
+export interface Verbs {
+  text(id: string, x: number, y: number, t: string, fontSize: number, color?: string): void;
+  labeledRect(
+    id: string,
+    x: number,
+    y: number,
+    width: number,
+    height: number,
+    fam: Family,
+    label: string,
+    fontSize: number,
+  ): void;
+  arrow(id: string, x: number, y: number, pts: number[][], color?: string, label?: string): void;
+  connect(
+    id: string,
+    fromBoxId: string,
+    toBoxId: string,
+    opts?: { color?: string; label?: string },
+  ): void;
+  zone(id: string, x: number, y: number, width: number, height: number, fam: Family): void;
+  raw(e: El): void;
+}
+
+// Build the authoring verbs over an EXTERNAL elements array. Both scene()
+// (which owns build()/dark) and open() (mutate-in-place on a loaded file) share
+// this single factory, so binding logic (connect) lives in exactly one place.
+// All verbs mutate `els` in place.
+export function makeVerbs(els: El[], opts: { dark?: boolean } = {}): Verbs {
+  const DARK = !!opts.dark;
+  const ink = DARK ? "#e5e5e5" : "#1e1e1e";
+
+  const base = (e: El): El => baseEl(ink, e);
 
   const baseText = (e: El): El => {
     const merged = base(e);
@@ -342,6 +374,16 @@ export function scene(opts: { dark?: boolean } = {}) {
   // Escape hatch for ellipse/diamond/etc.
   const raw = (e: El) => els.push(base(e));
 
+  return { text, labeledRect, arrow, connect, zone, raw };
+}
+
+export function scene(opts: { dark?: boolean } = {}) {
+  const DARK = !!opts.dark;
+  const els: El[] = [];
+  const verbs = makeVerbs(els, opts);
+  const ink = DARK ? "#e5e5e5" : "#1e1e1e";
+  const base = (e: El): El => baseEl(ink, e);
+
   const build = (): ExcalidrawScene => {
     const all = [...els];
     if (DARK) {
@@ -373,5 +415,5 @@ export function scene(opts: { dark?: boolean } = {}) {
     };
   };
 
-  return { text, labeledRect, arrow, connect, zone, raw, build, dark: DARK };
+  return { ...verbs, build, dark: DARK };
 }
