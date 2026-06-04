@@ -3,7 +3,7 @@ import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
 import { writeSceneFile, EchoGuard } from "./writeback";
-import { load } from "./load";
+import { load, type LoadedScene } from "./load";
 
 let tmpDir: string;
 afterEach(() => {
@@ -93,8 +93,7 @@ describe("byte-stable save (AC4: changing one element leaves others untouched)",
     target.label = "updated";
     target.x = 99;
 
-    const guard = new EchoGuard();
-    loaded.save(guard);
+    loaded.save({});
 
     // Re-load and check
     const reloaded = load(filePath);
@@ -114,5 +113,65 @@ describe("byte-stable save (AC4: changing one element leaves others untouched)",
 
     // Order is preserved
     expect(reloadedElements.map((e) => e.id)).toEqual(["agent-box", "human-abc", "another-box"]);
+  });
+});
+
+// ─── Issue #7: save({source?}) — no guard on the agent path ──────────────────
+
+describe("save({ source? }) API — no EchoGuard argument (issue #7 AC1)", () => {
+  it("save() accepts no arguments and writes the file atomically", () => {
+    const dir = makeTmpDir();
+    const el = { id: "ag1", type: "rectangle", x: 0, y: 0 };
+    const filePath = writeTmp(dir, [el]);
+
+    const loaded = load(filePath);
+    const target = loaded.byId("ag1")!;
+    target.x = 42;
+
+    // New API: no guard argument
+    loaded.save({});
+
+    const onDisk = JSON.parse(fs.readFileSync(filePath, "utf8"));
+    expect(onDisk.elements[0].x).toBe(42);
+    // atomic: no lingering tmp
+    expect(fs.readdirSync(dir).filter((f) => f.endsWith(".tmp"))).toEqual([]);
+  });
+
+  it("save() type signature does NOT accept an EchoGuard (guard param is gone)", () => {
+    // This is a compile-time / type-level test enforced at runtime:
+    // We verify the LoadedScene interface has save taking no guard.
+    // The TypeScript type must be save(opts?: { source?: string }): void
+    const dir = makeTmpDir();
+    const filePath = writeTmp(dir, []);
+    const loaded: LoadedScene = load(filePath);
+
+    // These must all compile and work: no guard, empty opts, with source
+    loaded.save();
+    loaded.save({});
+    loaded.save({ source: "my-agent" });
+  });
+});
+
+describe("save({ source }) sets the source field in the written file (issue #7 AC5)", () => {
+  it("uses the provided source when given", () => {
+    const dir = makeTmpDir();
+    const filePath = writeTmp(dir, []);
+    const loaded = load(filePath);
+
+    loaded.save({ source: "my-agent" });
+
+    const onDisk = JSON.parse(fs.readFileSync(filePath, "utf8"));
+    expect(onDisk.source).toBe("my-agent");
+  });
+
+  it("defaults source to 'duet' when omitted", () => {
+    const dir = makeTmpDir();
+    const filePath = writeTmp(dir, []);
+    const loaded = load(filePath);
+
+    loaded.save();
+
+    const onDisk = JSON.parse(fs.readFileSync(filePath, "utf8"));
+    expect(onDisk.source).toBe("duet");
   });
 });

@@ -3,6 +3,7 @@ import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
 import { ensureScene, bootstrap } from "./cli";
+import { load } from "./load";
 
 let tmpDir: string;
 let servers: Array<{ stop(): void }> = [];
@@ -237,5 +238,44 @@ describe("browser write-back echo guard (full loop)", () => {
     }
     expect(collector.scenes.length).toBe(1);
     expect(collector.scenes[0]).toEqual(agentScene);
+  });
+});
+
+// ─── Issue #7: agent save({source}) reaches watcher + broadcasts (no echo suppression) ─
+
+describe("agent save reaches watcher and broadcasts (issue #7 AC4)", () => {
+  it("an agent save() is NOT echo-suppressed: watcher fires and broadcasts to tabs", async () => {
+    tmpDir = makeTmpDir();
+    const filePath = path.join(tmpDir, "agent.excalidraw");
+
+    const handle = bootstrap({ filePath, port: 0, openBrowser: () => {} });
+    handles.push(handle);
+
+    const ws = new WebSocket(`ws://localhost:${handle.server.port}/`);
+    handles.push({ close: async () => ws.close() });
+    await wsOpen(ws);
+    await nextSceneMessage(ws); // consume initial replay
+
+    // chokidar ready settle
+    await new Promise((r) => setTimeout(r, 250));
+
+    const collector = collectScenes(ws);
+
+    // Agent loads the file and saves with a new element — no guard involved.
+    const scene = load(filePath);
+    const elements = scene.list();
+    elements.push({ id: "agent-el", type: "rectangle", x: 0, y: 0, width: 50, height: 50 } as any);
+    scene.save({ source: "my-agent" });
+
+    // The watcher must pick this up and broadcast to the tab.
+    for (let i = 0; i < 150; i++) {
+      if (collector.scenes.length > 0) break;
+      await new Promise((r) => setTimeout(r, 20));
+    }
+    expect(collector.scenes.length).toBe(1);
+    expect((collector.scenes[0] as any).source).toBe("my-agent");
+    expect(
+      (collector.scenes[0] as any).elements.some((e: any) => e.id === "agent-el"),
+    ).toBe(true);
   });
 });
