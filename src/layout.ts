@@ -13,7 +13,7 @@
 // Callers must pass EVERY element they want moved (e.g. a box AND its bound
 // label together), since these helpers translate whatever they receive.
 
-import type { El } from "./scene-types.ts";
+import type { El } from "./scene-types";
 
 export interface Bbox {
   x: number;
@@ -22,8 +22,11 @@ export interface Bbox {
   h: number;
 }
 
-// Bounding box of a single element (rect via x/width, arrow via point offsets).
-function elBbox(e: El): Bbox {
+/**
+ * Bounding box of a SINGLE element (rect via x/width, arrow via point offsets).
+ * Shared per-element primitive — geometry.ts reuses this too.
+ */
+export function elementBbox(e: El): Bbox {
   if (e.points) {
     const xs = (e.points as number[][]).map((p) => e.x + p[0]);
     const ys = (e.points as number[][]).map((p) => e.y + p[1]);
@@ -36,7 +39,7 @@ function elBbox(e: El): Bbox {
 
 /** Union bounding box of a set of elements. */
 export function bbox(els: El[]): Bbox {
-  const boxes = els.map(elBbox);
+  const boxes = els.map(elementBbox);
   const minX = Math.min(...boxes.map((b) => b.x));
   const minY = Math.min(...boxes.map((b) => b.y));
   const maxX = Math.max(...boxes.map((b) => b.x + b.w));

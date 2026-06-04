@@ -9,6 +9,7 @@
 
 import type { El } from "./scene-types";
 export type { El } from "./scene-types";
+import { elementBbox } from "./layout";
 
 export type ViolationType =
   | "label-wider-than-box"
@@ -68,17 +69,9 @@ function elements(input: { elements?: El[] } | El[]): El[] {
 }
 
 // Axis-aligned bounding box of any element (rectangle/text via x/width, arrow
-// via its point offsets). Mirrors buildSvg's xs/ys logic in local-renderer.ts.
-function bbox(e: El): Rect {
-  if (e.points) {
-    const xs = e.points.map((p: number[]) => e.x + p[0]);
-    const ys = e.points.map((p: number[]) => e.y + p[1]);
-    const minX = Math.min(...xs);
-    const minY = Math.min(...ys);
-    return { x: minX, y: minY, w: Math.max(...xs) - minX, h: Math.max(...ys) - minY };
-  }
-  return { x: e.x, y: e.y, w: e.width ?? 0, h: e.height ?? 0 };
-}
+// via its point offsets). Shared per-element primitive — see layout.elementBbox.
+// Rect and Bbox are structurally identical ({x,y,w,h}).
+const bbox = (e: El): Rect => elementBbox(e);
 
 // The arrow's end point in absolute coords (last point offset + origin).
 function arrowEnd(e: El): { x: number; y: number } {
