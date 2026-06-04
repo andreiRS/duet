@@ -224,3 +224,44 @@ describe("save() runs geometry check by default (issue #10)", () => {
     expect(report.fixed).toEqual([]);
   });
 });
+
+// ─── Issue #11: open() fails fast on a malformed read ────────────────────────
+
+describe("open() on a malformed .excalidraw file (issue #11)", () => {
+  it("AC1: throws a clear, identifiable error — message mentions malformed/invalid JSON and the path", () => {
+    const dir = makeTmpDir();
+    const filePath = path.join(dir, "corrupt.excalidraw");
+    fs.writeFileSync(filePath, "{ not valid json");
+
+    expect(() => open(filePath)).toThrow(/malformed|invalid JSON/i);
+    expect(() => open(filePath)).toThrow(filePath);
+  });
+
+  it("AC2: writes nothing when the read fails — the corrupt file bytes are unchanged", () => {
+    const dir = makeTmpDir();
+    const filePath = path.join(dir, "corrupt.excalidraw");
+    const corrupt = "{ truncated";
+    fs.writeFileSync(filePath, corrupt);
+
+    try { open(filePath); } catch {}
+
+    expect(fs.readFileSync(filePath, "utf8")).toBe(corrupt);
+    // No extra files created
+    expect(fs.readdirSync(dir)).toEqual(["corrupt.excalidraw"]);
+  });
+
+  it("AC3: a valid file is unaffected — loads, verbs work, save works", () => {
+    const dir = makeTmpDir();
+    const filePath = writeTmp(dir, [{ id: "existing", type: "rectangle", x: 0, y: 0 }]);
+
+    const h = open(filePath);
+    expect(h.byId("existing")!.id).toBe("existing");
+
+    h.text("added", 10, 10, "hello", 16);
+    h.save();
+
+    const onDisk = JSON.parse(fs.readFileSync(filePath, "utf8"));
+    expect(onDisk.elements.map((e: { id: string }) => e.id)).toContain("existing");
+    expect(onDisk.elements.map((e: { id: string }) => e.id)).toContain("added");
+  });
+});

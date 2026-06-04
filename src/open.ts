@@ -44,7 +44,17 @@ export interface OpenScene extends Verbs {
  */
 export function open(filePath: string): OpenScene {
   const exists = fs.existsSync(filePath);
-  const parsed = exists ? readSceneFile(filePath) : undefined;
+  let parsed: ReturnType<typeof readSceneFile> | undefined;
+  if (exists) {
+    try {
+      parsed = readSceneFile(filePath);
+    } catch (cause) {
+      throw new Error(
+        `open(${filePath}): malformed .excalidraw (invalid JSON): ${(cause as Error).message}`,
+        { cause }
+      );
+    }
+  }
   const elements: El[] = parsed ? elementsOf(parsed) : [];
   const appState = parsed?.appState ?? {};
 
