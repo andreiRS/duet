@@ -12,7 +12,7 @@ bun install
 bun run duet path/to/scene.excalidraw   # creates the file if missing
 ```
 
-Opens http://localhost:3000 in your browser. Open more tabs at the same URL,
+Opens http://localhost:3737 in your browser. Open more tabs at the same URL,
 they all stay in sync.
 
 ## How it works

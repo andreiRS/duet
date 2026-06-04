@@ -34,7 +34,7 @@ export interface BootstrapHandle extends ServerHandle {
 
 export function bootstrap({
   filePath,
-  port = 3000,
+  port = 3737,
   openBrowser,
 }: BootstrapOptions): BootstrapHandle {
   ensureScene(filePath);
