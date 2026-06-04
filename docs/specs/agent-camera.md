@@ -34,7 +34,7 @@ agent → `duet camera ...` (CLI) → HTTP POST /camera → server → ws.publis
 
 The browser receives a distinct `{type:"camera"}` message on a **separate**
 `applyCamera()` path that just calls `api.scrollToContent(elements, {
-fitToContent: true, animate: true, duration, maxZoom })`. It runs none of the
+fitToContent: true, animate: true, duration })`. It runs none of the
 content-sync machinery — no scene version re-stamp, no remote-apply guard, no
 "Agent updated the canvas" flash — because no content changed. The view move is
 **silent**. It also needs no save-suppression logic: the client's save-gate keys
@@ -42,10 +42,11 @@ on the element version (`sceneVersion`), and a `scrollToContent` only mutates
 `scroll*`/`zoom`, so the gate already swallows it. `applyCamera()` never calls
 `updateScene`, so there is nothing to guard.
 
-The move is **animated** with a small tween — `animate: true`, `duration` ~300ms
-(Excalidraw's built-in ease-out; we control on/off and duration, not the curve),
-and `maxZoom: 1` so framing a single small element does not blow up to a
-disorienting zoom. The agent can request an instant jump with `--no-animate`.
+The move is **animated** with a small tween — `animate: true`, `duration` 400ms
+(Excalidraw's built-in ease-out; we control on/off and duration, not the curve).
+We do **not** pass `maxZoom`: `fitToContent` only zooms out and caps at 100%, so
+framing a single small element settles at 1:1 rather than a disorienting zoom.
+The agent can request an instant jump with `--no-animate`.
 
 Two operations:
 
@@ -114,7 +115,7 @@ All tabs follow a camera command (one broadcast, no per-tab targeting), matching
 - As the agent, my framed set is all-or-nothing: if I name any id that doesn't
   exist, no tab moves and I get told which id was missing, so I never land a tab
   on a viewport I didn't ask for.
-- As the human, the view tweens to the new frame (~300ms) instead of jumping, so
+- As the human, the view tweens to the new frame (~400ms) instead of jumping, so
   I keep my bearings; the agent can opt into an instant jump with `--no-animate`.
 
 ### Out of scope
@@ -188,8 +189,11 @@ All tabs follow a camera command (one broadcast, no per-tab targeting), matching
 - **Poll-window ceiling.** Set at 400ms (50ms interval). Too short reintroduces
   the write-then-frame race; too long delays a real bad-id error. Tune against
   the watcher's observed latency in testing.
-- **`maxZoom` cap.** Starting at `1` so framing one small element does not zoom
-  past 100%. May be too tight (a small box ends up small on screen); prototype at
-  `1`, then test `2`–`3` and pick by feel. Left open deliberately.
-- **Tween duration.** Starting at ~300ms; a constant to tweak by feel during
-  testing, not a committed value.
+- **`maxZoom` cap.** ✅ Resolved in #24 (attended canvas test). Kept the 100%
+  cap: the browser relies on `scrollToContent({ fitToContent: true })`, which
+  only zooms *out*, and we deliberately do **not** pass `maxZoom`. Framing a
+  single small element at 1:1 felt fine on the canvas, so no `maxZoom` knob was
+  added. Revisit only if a small-element fit feels too small in practice.
+- **Tween duration.** ✅ Resolved in #24: **400ms** (300ms felt a touch fast).
+  Set in both `CAMERA_FIT_DURATION_MS` (cli.ts, what the CLI sends) and
+  `CAMERA_DEFAULT_DURATION_MS` (camera.ts, the non-CLI fallback).
