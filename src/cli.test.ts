@@ -259,23 +259,17 @@ describe("agent save reaches watcher and broadcasts (issue #7 AC4)", () => {
     // chokidar ready settle
     await new Promise((r) => setTimeout(r, 250));
 
-    const collector = collectScenes(ws);
-
     // Agent loads the file and saves with a new element — no guard involved.
     const scene = load(filePath);
     const elements = scene.list();
     elements.push({ id: "agent-el", type: "rectangle", x: 0, y: 0, width: 50, height: 50 } as any);
+
+    const broadcastP = nextSceneMessage(ws);
     scene.save({ source: "my-agent" });
 
     // The watcher must pick this up and broadcast to the tab.
-    for (let i = 0; i < 150; i++) {
-      if (collector.scenes.length > 0) break;
-      await new Promise((r) => setTimeout(r, 20));
-    }
-    expect(collector.scenes.length).toBe(1);
-    expect((collector.scenes[0] as any).source).toBe("my-agent");
-    expect(
-      (collector.scenes[0] as any).elements.some((e: any) => e.id === "agent-el"),
-    ).toBe(true);
+    const msg = await broadcastP;
+    expect(msg.scene.source).toBe("my-agent");
+    expect(msg.scene.elements.some((e: any) => e.id === "agent-el")).toBe(true);
   });
 });
