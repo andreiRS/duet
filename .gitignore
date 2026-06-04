@@ -3,5 +3,7 @@ dist/
 *.log
 .DS_Store
 scene.excalidraw
+test.excalidraw
 .firecrawl
 .duet/
+.playwright-cli/
