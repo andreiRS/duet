@@ -26,6 +26,13 @@ function sceneMsg(scene: Scene): string {
   return JSON.stringify({ type: "scene", scene });
 }
 
+function jsonResponse(body: unknown, status = 200): Response {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { "Content-Type": "application/json" },
+  });
+}
+
 // Re-read the current on-disk elements for the browser-save merge. If the file
 // does not exist yet, disk is empty (mergeById([], incoming) preserves today's
 // "write the incoming scene" behavior). On a malformed/unreadable read, log and
@@ -56,15 +63,68 @@ export function createServer({
   echoGuard,
 }: ServerOptions = {}): ServerHandle {
   let currentScene: Scene = null;
+  const clients = new Set<import("bun").ServerWebSocket<unknown>>();
 
   const server = Bun.serve({
     port,
-    fetch(req, srv) {
+    async fetch(req, srv) {
       // Upgrade websocket connections; upgrade() returns false for plain HTTP
       if (srv.upgrade(req)) return undefined;
 
-      // Static file serving
       const url = new URL(req.url);
+
+      // POST /camera — out-of-band camera fan-out (ADR-0005)
+      if (req.method === "POST" && url.pathname === "/camera") {
+        let body: unknown;
+        try {
+          body = await req.json();
+        } catch {
+          return jsonResponse({ error: "invalid JSON" }, 400);
+        }
+
+        if (
+          typeof body !== "object" ||
+          body === null ||
+          (body as { op?: unknown }).op !== "fit"
+        ) {
+          return jsonResponse({ error: "op must be 'fit'" }, 400);
+        }
+
+        const { to, animate, duration } = body as {
+          to?: string[];
+          animate?: unknown;
+          duration?: unknown;
+        };
+
+        const elements = elementsOf(currentScene ?? { elements: [] }) as { id: string }[];
+
+        // Plain fit with no elements → nothing to frame
+        if (!to && elements.length === 0) {
+          return jsonResponse({ error: "nothing to frame" }, 422);
+        }
+
+        // --to: all-or-nothing validation
+        if (to !== undefined) {
+          const existingIds = new Set(elements.map((e) => e.id));
+          const missing = to.filter((id) => !existingIds.has(id));
+          if (missing.length > 0) {
+            return jsonResponse({ missing }, 422);
+          }
+        }
+
+        // Build and publish camera message (not a content path — no file write,
+        // no echo guard, no scene version bump)
+        const cameraMsg: Record<string, unknown> = { type: "camera", op: "fit" };
+        if (to !== undefined) cameraMsg.ids = to;
+        if (animate !== undefined) cameraMsg.animate = animate;
+        if (duration !== undefined) cameraMsg.duration = duration;
+
+        server.publish("scene", JSON.stringify(cameraMsg));
+
+        return jsonResponse({ framed: clients.size });
+      }
+
+      // Static file serving
       const fullPath = path.join(distDir, url.pathname);
 
       if (isFile(fullPath)) {
@@ -81,6 +141,7 @@ export function createServer({
     },
     websocket: {
       open(ws) {
+        clients.add(ws);
         ws.subscribe("scene");
         // Replay current scene immediately
         ws.send(sceneMsg(currentScene));
@@ -128,7 +189,9 @@ export function createServer({
           }
         }
       },
-      close(_ws) {},
+      close(ws) {
+        clients.delete(ws);
+      },
     },
   });
 
