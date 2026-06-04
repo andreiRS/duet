@@ -12,6 +12,21 @@ export function shouldPersist(prevVersion: number, nextVersion: number): boolean
   return nextVersion !== prevVersion;
 }
 
+// Summed element version, a dependency-free mirror of Excalidraw's
+// getSceneVersion (which is `elements.reduce((a, e) => a + e.version, 0)`).
+// Reimplemented here because @excalidraw is browser-only and cannot be imported
+// in node tests, and because getSceneVersion is now deprecated. The client gates
+// saves on this sum, so it MUST count every element it is given — including
+// deleted tombstones — exactly as getSceneVersion does: Excalidraw hands
+// onChange the including-deleted array, and the post-apply baseline must sum the
+// SAME set or a tombstone's version shows up in one sum but not the other,
+// bouncing a no-op save forever (the "Agent updated the canvas" loop).
+export function sceneVersion(
+  elements: ReadonlyArray<{ version?: number; [key: string]: unknown }>,
+): number {
+  return elements.reduce((acc, el) => acc + (el.version ?? 0), 0);
+}
+
 // Pure client-side persist decision, extracted from App.tsx so it is testable.
 // Returns true only for a genuine human edit that should be written back.
 //  - isApplyingRemote: a remote/agent scene is currently being applied; the

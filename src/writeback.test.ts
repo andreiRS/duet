@@ -11,6 +11,7 @@ import {
   EchoGuard,
   writeSceneFile,
   atomicWriteScene,
+  sceneVersion,
 } from "./writeback";
 
 describe("shouldPersist (version gate)", () => {
@@ -56,6 +57,66 @@ describe("shouldPersistEdit (client-side persist decision)", () => {
   it("persists a genuine human edit even when the version moves downward", () => {
     expect(
       shouldPersistEdit({ isApplyingRemote: false, prevVersion: 9, nextVersion: 4 }),
+    ).toBe(true);
+  });
+});
+
+describe("sceneVersion (summed element version, mirror of Excalidraw's getSceneVersion)", () => {
+  it("sums element versions", () => {
+    expect(sceneVersion([{ version: 5 }, { version: 3 }])).toBe(8);
+  });
+
+  it("treats a missing version as 0", () => {
+    expect(sceneVersion([{ version: 5 }, {}])).toBe(5);
+  });
+
+  it("counts deleted (tombstone) elements just like Excalidraw's onChange does", () => {
+    // Excalidraw hands onChange the INCLUDING-DELETED element array, and
+    // getSceneVersion sums every element's version regardless of isDeleted.
+    // sceneVersion must match so the client gate can compare like-for-like.
+    expect(sceneVersion([{ version: 5 }, { version: 7, isDeleted: true }])).toBe(12);
+  });
+});
+
+describe("agent-update loop regression: a scene with a tombstone must not bounce a no-op save", () => {
+  // Real-world repro: applying a scene that holds a deleted element (e.g. a
+  // pipe rectangle the agent removed) produced an endless "Agent updated the
+  // canvas" loop. App.applyScene recorded its post-apply baseline over the
+  // LIVE-only element set (getSceneElements), but Excalidraw reports onChange
+  // over the INCLUDING-DELETED set. The tombstone's version is in one sum but
+  // not the other, so the gate saw a phantom delta on every apply and shipped a
+  // no-op save, which the server rebroadcast, ad infinitum. The fix records the
+  // baseline over the SAME including-deleted set onChange uses.
+  const live = [
+    { id: "pipe_0", version: 154 },
+    { id: "pipe_2", version: 102 },
+  ];
+  const deleted = [{ id: "pipe_1", version: 180, isDeleted: true }];
+  const includingDeleted = [...live, ...deleted];
+
+  // What Excalidraw passes to onChange right after the apply (no human edit).
+  const onChangeVersion = sceneVersion(includingDeleted);
+
+  it("baseline over the including-deleted set absorbs the post-apply onChange (no save)", () => {
+    const baseline = sceneVersion(includingDeleted);
+    expect(
+      shouldPersistEdit({
+        isApplyingRemote: false,
+        prevVersion: baseline,
+        nextVersion: onChangeVersion,
+      }),
+    ).toBe(false);
+  });
+
+  it("baseline over the live-only set falsely persists (documents the old bug)", () => {
+    const buggyBaseline = sceneVersion(live);
+    expect(buggyBaseline).not.toBe(onChangeVersion);
+    expect(
+      shouldPersistEdit({
+        isApplyingRemote: false,
+        prevVersion: buggyBaseline,
+        nextVersion: onChangeVersion,
+      }),
     ).toBe(true);
   });
 });
