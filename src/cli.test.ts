@@ -2,7 +2,7 @@ import { describe, it, expect, afterEach } from "bun:test";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
-import { ensureScene, bootstrap, runCameraCommand, runNew, serveError, HELP } from "./cli";
+import { ensureScene, bootstrap, runCameraCommand, runNew, runLs, serveError, HELP } from "./cli";
 import { createServer } from "./server";
 import { open } from "./open";
 
@@ -301,6 +301,11 @@ describe("HELP", () => {
     expect(HELP).toContain("duet camera fit");
   });
 
+  it("documents `duet ls` and its --json flag", () => {
+    expect(HELP).toContain("duet ls");
+    expect(HELP).toContain("--json");
+  });
+
   it("lists the planned camera ops and marks them not implemented", () => {
     expect(HELP).toContain("camera zoom");
     expect(HELP).toContain("camera pan");
@@ -370,6 +375,55 @@ describe("camera op dispatch (binary)", () => {
   });
 });
 
+describe("ls dispatch (binary)", () => {
+  async function runCli(args: string[]): Promise<{ code: number; out: string; err: string }> {
+    const proc = Bun.spawn(["bun", "run", "src/cli.ts", ...args], {
+      cwd: process.cwd(),
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    const out = await new Response(proc.stdout).text();
+    const err = await new Response(proc.stderr).text();
+    const code = await proc.exited;
+    return { code, out, err };
+  }
+
+  it("routes `duet ls <file>` and prints the rows on stdout, exit 0", async () => {
+    tmpDir = makeTmpDir();
+    const filePath = path.join(tmpDir, "scene.excalidraw");
+    fs.writeFileSync(
+      filePath,
+      JSON.stringify({ type: "excalidraw", version: 2, elements: [{ id: "Qz7Lm2", type: "text", text: "Queue" }], appState: {}, files: {} }),
+      "utf8",
+    );
+
+    const { code, out } = await runCli(["ls", filePath]);
+    expect(code).toBe(0);
+    expect(out).toContain("Qz7Lm2");
+    expect(out).toContain('"Queue"');
+  });
+
+  it("routes `duet ls --json <file>` to JSON output", async () => {
+    tmpDir = makeTmpDir();
+    const filePath = path.join(tmpDir, "scene.excalidraw");
+    fs.writeFileSync(
+      filePath,
+      JSON.stringify({ type: "excalidraw", version: 2, elements: [{ id: "Qz7Lm2", type: "text", text: "Queue" }], appState: {}, files: {} }),
+      "utf8",
+    );
+
+    const { code, out } = await runCli(["ls", "--json", filePath]);
+    expect(code).toBe(0);
+    expect(JSON.parse(out)).toEqual([{ id: "Qz7Lm2", type: "text", label: "Queue" }]);
+  });
+
+  it("errors and exits 1 when no file path is given", async () => {
+    const { code, err } = await runCli(["ls"]);
+    expect(code).toBe(1);
+    expect(err).toContain("file path");
+  });
+});
+
 describe("runNew", () => {
   it("creates a valid empty scene and reports the path, exit 0", () => {
     tmpDir = makeTmpDir();
@@ -402,6 +456,131 @@ describe("runNew", () => {
     const result = runNew(undefined);
     expect(result.code).toBe(1);
     expect(result.stderr ?? "").toContain("file path");
+  });
+});
+
+describe("runLs", () => {
+  function writeScene(elements: any[]): string {
+    tmpDir = makeTmpDir();
+    const filePath = path.join(tmpDir, "scene.excalidraw");
+    fs.writeFileSync(
+      filePath,
+      JSON.stringify({ type: "excalidraw", version: 2, source: "x", elements, appState: {}, files: {} }),
+      "utf8",
+    );
+    return filePath;
+  }
+
+  it("prints one row per element with id, type and a text element's own text as label", () => {
+    const filePath = writeScene([{ id: "Qz7Lm2", type: "text", text: "Queue" }]);
+
+    const result = runLs(filePath, {});
+
+    expect(result.code).toBe(0);
+    const lines = (result.stdout ?? "").trimEnd().split("\n");
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toContain("Qz7Lm2");
+    expect(lines[0]).toContain("text");
+    expect(lines[0]).toContain('"Queue"');
+  });
+
+  it("folds a container's bound text into its row and gives the bound text no row of its own", () => {
+    const filePath = writeScene([
+      { id: "aB3xK9", type: "rectangle", boundElements: [{ type: "text", id: "tX1yZ0" }] },
+      { id: "tX1yZ0", type: "text", text: "WhatsApp adapter", containerId: "aB3xK9" },
+    ]);
+
+    const result = runLs(filePath, {});
+
+    const lines = (result.stdout ?? "").trimEnd().split("\n");
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toContain("aB3xK9");
+    expect(lines[0]).toContain("rectangle");
+    expect(lines[0]).toContain('"WhatsApp adapter"');
+    expect(result.stdout ?? "").not.toContain("tX1yZ0");
+  });
+
+  it("shows an empty label for a shape with no text", () => {
+    const filePath = writeScene([{ id: "mN4pR8", type: "arrow" }]);
+
+    const result = runLs(filePath, {});
+
+    const lines = (result.stdout ?? "").trimEnd().split("\n");
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toContain("mN4pR8");
+    expect(lines[0]).toContain("arrow");
+    expect(lines[0]).toContain('""');
+  });
+
+  it("skips soft-deleted elements", () => {
+    const filePath = writeScene([
+      { id: "live01", type: "rectangle" },
+      { id: "gone02", type: "rectangle", isDeleted: true },
+    ]);
+
+    const result = runLs(filePath, {});
+
+    const lines = (result.stdout ?? "").trimEnd().split("\n");
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toContain("live01");
+    expect(result.stdout ?? "").not.toContain("gone02");
+  });
+
+  it("with { json: true } emits a parseable array of {id,type,label}", () => {
+    const filePath = writeScene([
+      { id: "aB3xK9", type: "rectangle", boundElements: [{ type: "text", id: "tX1yZ0" }] },
+      { id: "tX1yZ0", type: "text", text: "WhatsApp adapter", containerId: "aB3xK9" },
+      { id: "mN4pR8", type: "arrow" },
+    ]);
+
+    const result = runLs(filePath, { json: true });
+
+    expect(result.code).toBe(0);
+    const parsed = JSON.parse(result.stdout ?? "[]");
+    expect(parsed).toEqual([
+      { id: "aB3xK9", type: "rectangle", label: "WhatsApp adapter" },
+      { id: "mN4pR8", type: "arrow", label: "" },
+    ]);
+  });
+
+  it("aligns the type column so labels start at the same offset across rows", () => {
+    const filePath = writeScene([
+      { id: "aB3xK9", type: "rectangle", boundElements: [{ type: "text", id: "tX1yZ0" }] },
+      { id: "tX1yZ0", type: "text", text: "WhatsApp adapter", containerId: "aB3xK9" },
+      { id: "Qz7Lm2", type: "text", text: "Queue" },
+    ]);
+
+    const result = runLs(filePath, {});
+
+    const lines = (result.stdout ?? "").trimEnd().split("\n");
+    // The label (opening quote) starts at the same column on every row.
+    const offsets = lines.map((l) => l.indexOf('"'));
+    expect(new Set(offsets).size).toBe(1);
+  });
+
+  it("errors with usage when no path is given, exit 1", () => {
+    const result = runLs(undefined, {});
+    expect(result.code).toBe(1);
+    expect(result.stderr ?? "").toContain("file path");
+  });
+
+  it("errors on a missing file, exit 1", () => {
+    tmpDir = makeTmpDir();
+    const filePath = path.join(tmpDir, "ghost.excalidraw");
+
+    const result = runLs(filePath, {});
+    expect(result.code).toBe(1);
+    expect(result.stderr ?? "").toContain(filePath);
+  });
+
+  it("errors on malformed JSON, exit 1", () => {
+    tmpDir = makeTmpDir();
+    const filePath = path.join(tmpDir, "broken.excalidraw");
+    fs.writeFileSync(filePath, "{ not valid", "utf8");
+
+    const result = runLs(filePath, {});
+    expect(result.code).toBe(1);
+    expect(result.stderr ?? "").toContain("could not read");
   });
 });
 

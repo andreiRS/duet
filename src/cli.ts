@@ -20,6 +20,9 @@ Usage:
                                 and open the scene in your browser. Edit the file
                                 directly to drive the canvas. Errors if the file is
                                 missing (create it with \`duet new\`).
+  duet ls <file.excalidraw>     List the scene's elements (id, type, label), one
+                                per line. Reads the file directly, no server
+                                needed. Use it to learn the ids \`camera --to\` wants.
   duet camera fit [options]     Fit (zoom + center) the browser camera to the
                                 scene, in every connected tab.
   duet camera zoom              Not implemented yet.
@@ -29,6 +32,10 @@ Usage:
 Options:
   --port <n>                    Port for the Duet server
                                 (default 3737, or the DUET_PORT env var).
+
+ls options:
+  --json                        Print a JSON array of {id,type,label} instead of
+                                aligned columns, for machine parsing.
 
 camera fit options:
   --to <id1,id2,...>            Fit (zoom + center) the view to these element ids.
@@ -44,6 +51,7 @@ camera fit output (stdout, JSON) and exit codes:
 Examples:
   duet new ./scene.excalidraw                   # scaffold a blank scene
   duet serve ./scene.excalidraw                 # serve it + open the browser
+  duet ls ./scene.excalidraw                    # list element ids + labels
   duet camera fit                               # fit the whole scene
   duet camera fit --to aB3xK9,Qz7Lm2            # zoom to two elements
   duet camera fit --to aB3xK9 --no-animate      # snap, no animation
@@ -174,6 +182,65 @@ export function runNew(filePath: string | undefined): CommandResult {
 }
 
 /**
+ * The label shown for one element: a text element uses its own `text`; any other
+ * shape uses the `text` of its bound text element (via `boundElements`). Empty
+ * string when there is no text.
+ */
+function labelOf(el: any, textById: Map<string, any>): string {
+  if (el.type === "text") return (el.text ?? "") as string;
+  const bound = Array.isArray(el.boundElements)
+    ? el.boundElements.find((b: any) => b.type === "text")
+    : undefined;
+  return bound ? ((textById.get(bound.id)?.text ?? "") as string) : "";
+}
+
+/**
+ * `duet ls <file>` — read the scene off disk (no server) and print one row per
+ * visible element so an agent can learn the random element ids it needs for
+ * `camera --to`. Plain columns by default; `{ json: true }` emits an array of
+ * `{id,type,label}`.
+ */
+export function runLs(
+  filePath: string | undefined,
+  opts: { json?: boolean },
+): CommandResult {
+  if (!filePath) {
+    return { code: 1, stderr: "duet: ls needs a file path, e.g. `duet ls ./scene.excalidraw`" };
+  }
+  let scene: any;
+  try {
+    scene = JSON.parse(fs.readFileSync(filePath, "utf8"));
+  } catch {
+    return { code: 1, stderr: `duet: could not read ${filePath} — is it a valid .excalidraw file?` };
+  }
+  const elements = (scene.elements ?? []) as any[];
+  const textById = new Map<string, any>(
+    elements.filter((el) => el.type === "text").map((el) => [el.id, el]),
+  );
+
+  // A text bound to a container is that container's label, not a row of its own.
+  const rows = elements
+    .filter((el) => !el.isDeleted)
+    .filter((el) => !(el.type === "text" && el.containerId))
+    .map((el) => ({
+      id: el.id as string,
+      type: el.type as string,
+      label: labelOf(el, textById),
+    }));
+
+  if (opts.json) {
+    return { code: 0, stdout: JSON.stringify(rows) };
+  }
+  // Pad id + type to their widest entry so the label column lines up.
+  const idW = Math.max(0, ...rows.map((r) => r.id.length));
+  const typeW = Math.max(0, ...rows.map((r) => r.type.length));
+  const lines = rows.map(
+    (r) => `${r.id.padEnd(idW)}  ${r.type.padEnd(typeW)}  ${JSON.stringify(r.label)}`,
+  );
+  return { code: 0, stdout: lines.join("\n") };
+}
+
+/**
  * Validate the target of `duet serve <file>`. Returns an error result when the
  * path is missing or absent on disk, or null when it's safe to bootstrap.
  * `serve` is strict (no auto-create) so a typo'd path fails loudly instead of
@@ -241,7 +308,7 @@ export function bootstrap({
 const isHelpFlag = (a: string | undefined): boolean =>
   a === "--help" || a === "-h" || a === "help";
 
-const KNOWN_COMMANDS = new Set(["new", "serve", "camera"]);
+const KNOWN_COMMANDS = new Set(["new", "serve", "ls", "camera"]);
 
 if (import.meta.main) {
   const argv = process.argv.slice(2);
@@ -258,6 +325,20 @@ if (import.meta.main) {
 
   if (argv[0] === "new") {
     const result = runNew(argv[1]);
+    if (result.stdout) process.stdout.write(result.stdout + "\n");
+    if (result.stderr) process.stderr.write(result.stderr + "\n");
+    process.exit(result.code);
+  } else if (argv[0] === "ls") {
+    // Short-lived reader: no server, no watcher. First non-flag arg is the file;
+    // --json switches to machine output.
+    const rest = argv.slice(1);
+    let json = false;
+    let filePath: string | undefined;
+    for (const a of rest) {
+      if (a === "--json") json = true;
+      else if (filePath === undefined && !a.startsWith("-")) filePath = a;
+    }
+    const result = runLs(filePath, { json });
     if (result.stdout) process.stdout.write(result.stdout + "\n");
     if (result.stderr) process.stderr.write(result.stderr + "\n");
     process.exit(result.code);
