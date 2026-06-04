@@ -64,3 +64,21 @@ test("a higher-version local tombstone wins over a stale remote element", () => 
   expect(merged[0].isDeleted).toBe(true);
   expect(merged[0].version).toBe(7);
 });
+
+// Locks the merge contract behind the App.tsx tombstone-source fix: a human
+// deletes X in the browser (Excalidraw soft-deletes -> X becomes an
+// isDeleted:true tombstone with a HIGHER version). Before the 400ms-debounced
+// save round-trips, a stale remote scene that still holds X ALIVE (lower
+// version) arrives. The local source must include the tombstone (App.tsx uses
+// getSceneElementsIncludingDeleted) so the version tiebreak runs: the tombstone
+// wins and the just-deleted element is NOT resurrected by the stale remote.
+test("a browser-deleted element is not resurrected by a stale remote scene", () => {
+  const remote = [{ id: "X", type: "rectangle", isDeleted: false, version: 3 }];
+  const local = [{ id: "X", type: "rectangle", isDeleted: true, version: 4 }];
+
+  const merged = mergeRemoteScene(remote, local);
+
+  expect(merged).toHaveLength(1);
+  expect(merged[0].id).toBe("X");
+  expect(merged[0].isDeleted).toBe(true);
+});
