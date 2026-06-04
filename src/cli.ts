@@ -10,18 +10,21 @@ const CAMERA_FIT_DURATION_MS = 400;
 
 // Usage text for `duet --help`. Kept here (not a man page) so an agent can
 // discover the camera command and its flags from the CLI alone.
-export const HELP = `Duet — live two-way sync of one .excalidraw file between an agent and the browser.
+export const HELP = `Duet keeps one .excalidraw file in sync between an AI agent and your browser, live.
+Watch the agent draw, grab any shape and fix it by hand. The file is the source of truth.
 
 Usage:
-  duet <file.excalidraw>        Start the sync server (HTTP + WebSocket + file watch)
-                                and open the scene in your browser. The file is the
-                                source of truth; edits on disk and in the browser stay
-                                in sync. Edit the file directly to drive the canvas.
+  duet new <file.excalidraw>    Create an empty scene file and print its path.
+                                Does not start the server. Errors if the file exists.
+  duet serve <file.excalidraw>  Start the sync server (HTTP + WebSocket + file watch)
+                                and open the scene in your browser. Edit the file
+                                directly to drive the canvas. Errors if the file is
+                                missing (create it with \`duet new\`).
   duet camera [options]         Move the browser camera in every connected tab.
   duet --help                   Show this help.
 
 Options:
-  --port <n>                    Port for the server / camera client
+  --port <n>                    Port for the Duet server
                                 (default 3737, or the DUET_PORT env var).
 
 camera options:
@@ -30,12 +33,14 @@ camera options:
                                 of elements in the .excalidraw file.
   --no-animate                  Jump instantly instead of animating the move.
 
-camera output (stdout, JSON):
-  {"framed":<n>}                <n> = tabs that moved. 0 tabs => exits 0 with a
-                                "0 tabs connected" note on stderr.
+camera output (stdout, JSON) and exit codes:
+  {"framed":<n>}                exit 0, n tabs moved (n may be 0 if no browser is open).
+  {"missing":[<id>,...]}        exit 1, one or more --to ids are not in the scene.
+  (stderr hint, no JSON)        exit 2, no server reachable on the port.
 
 Examples:
-  duet ./scene.excalidraw
+  duet new ./scene.excalidraw                   # scaffold a blank scene
+  duet serve ./scene.excalidraw                 # serve it + open the browser
   duet camera                                   # fit the whole scene
   duet camera --to aB3xK9,Qz7Lm2                # zoom to two elements
   duet camera --to aB3xK9 --no-animate          # snap, no animation
@@ -143,6 +148,44 @@ export function ensureScene(filePath: string): void {
   }
 }
 
+export interface CommandResult {
+  code: 0 | 1;
+  stdout?: string;
+  stderr?: string;
+}
+
+/**
+ * `duet new <file>` — scaffold a blank scene. Never serves, never clobbers:
+ * errors if the path already exists so an agent can't wipe work by re-running.
+ * Mirrors `cargo new` / `rails new` (create-only, separate from run).
+ */
+export function runNew(filePath: string | undefined): CommandResult {
+  if (!filePath) {
+    return { code: 1, stderr: "duet: new needs a file path, e.g. `duet new ./scene.excalidraw`" };
+  }
+  if (fs.existsSync(filePath)) {
+    return { code: 1, stderr: `duet: ${filePath} already exists — serve it with \`duet serve ${filePath}\`` };
+  }
+  fs.writeFileSync(filePath, JSON.stringify(EMPTY_SCENE, null, 2), "utf8");
+  return { code: 0, stdout: `created ${filePath}\nserve it with: duet serve ${filePath}` };
+}
+
+/**
+ * Validate the target of `duet serve <file>`. Returns an error result when the
+ * path is missing or absent on disk, or null when it's safe to bootstrap.
+ * `serve` is strict (no auto-create) so a typo'd path fails loudly instead of
+ * silently serving a fresh blank canvas.
+ */
+export function serveError(filePath: string | undefined): CommandResult | null {
+  if (!filePath) {
+    return { code: 1, stderr: "duet: serve needs a file path, e.g. `duet serve ./scene.excalidraw`" };
+  }
+  if (!fs.existsSync(filePath)) {
+    return { code: 1, stderr: `duet: no such scene: ${filePath} — create it with \`duet new ${filePath}\`` };
+  }
+  return null;
+}
+
 export interface BootstrapOptions {
   filePath: string;
   port?: number;
@@ -195,34 +238,72 @@ export function bootstrap({
 const isHelpFlag = (a: string | undefined): boolean =>
   a === "--help" || a === "-h" || a === "help";
 
+const KNOWN_COMMANDS = new Set(["new", "serve", "camera"]);
+
 if (import.meta.main) {
   const argv = process.argv.slice(2);
 
-  // `duet --help`, `duet -h`, `duet help`, or bare `duet camera --help`.
-  if (isHelpFlag(argv[0]) || (argv[0] === "camera" && argv.some(isHelpFlag))) {
+  // `duet --help`, `duet -h`, `duet help`, or `--help` after any known command
+  // (e.g. `duet camera --help`, `duet serve --help`).
+  if (
+    isHelpFlag(argv[0]) ||
+    (KNOWN_COMMANDS.has(argv[0]!) && argv.slice(1).some(isHelpFlag))
+  ) {
     process.stdout.write(HELP);
     process.exit(0);
   }
 
-  if (argv[0] === "camera") {
+  if (argv[0] === "new") {
+    const result = runNew(argv[1]);
+    if (result.stdout) process.stdout.write(result.stdout + "\n");
+    if (result.stderr) process.stderr.write(result.stderr + "\n");
+    process.exit(result.code);
+  } else if (argv[0] === "serve") {
+    // Parse args after "serve": first non-flag is the file, --port <n> optional.
+    const rest = argv.slice(1);
+    let portArg: string | undefined;
+    let filePath: string | undefined;
+    for (let i = 0; i < rest.length; i++) {
+      if (rest[i] === "--port") portArg = rest[++i];
+      else if (filePath === undefined && !rest[i]!.startsWith("-")) filePath = rest[i];
+    }
+
+    const err = serveError(filePath);
+    if (err) {
+      if (err.stderr) process.stderr.write(err.stderr + "\n");
+      process.exit(err.code);
+    }
+
+    // Port precedence: --port flag > DUET_PORT env > 3737 default.
+    const portRaw = portArg ?? process.env.DUET_PORT ?? "3737";
+    const port = Number(portRaw);
+    if (!Number.isInteger(port) || port < 0) {
+      process.stderr.write("duet: --port requires a number\n");
+      process.exit(1);
+    }
+
+    // Long-running: bootstrap keeps the process alive (server + watcher).
+    bootstrap({
+      filePath: filePath!,
+      port,
+      openBrowser: (url) => {
+        Bun.spawn(["open", url]);
+      },
+    });
+  } else if (argv[0] === "camera") {
     // Short-lived POST client — boots no server, no watcher
     const cameraArgv = argv.slice(1); // args after "camera"
     const result = await runCameraCommand(cameraArgv, process.env as Record<string, string | undefined>);
     if (result.stdout) process.stdout.write(result.stdout + "\n");
     if (result.stderr) process.stderr.write(result.stderr + "\n");
     process.exit(result.code);
-  }
-
-  const filePath = argv[0];
-  if (!filePath) {
-    // No file and no command: show help so an agent learns the commands.
+  } else if (argv[0]?.endsWith(".excalidraw")) {
+    // Old positional form — nudge toward the verb.
+    process.stderr.write(`duet: no command given — did you mean \`duet serve ${argv[0]}\`?\n`);
+    process.exit(1);
+  } else {
+    // Unknown / no command: show help so an agent learns the commands.
     process.stderr.write(HELP);
     process.exit(1);
   }
-  bootstrap({
-    filePath,
-    openBrowser: (url) => {
-      Bun.spawn(["open", url]);
-    },
-  });
 }

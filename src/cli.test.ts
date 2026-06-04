@@ -2,7 +2,7 @@ import { describe, it, expect, afterEach } from "bun:test";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
-import { ensureScene, bootstrap, runCameraCommand, HELP } from "./cli";
+import { ensureScene, bootstrap, runCameraCommand, runNew, serveError, HELP } from "./cli";
 import { createServer } from "./server";
 import { open } from "./open";
 
@@ -288,14 +288,27 @@ function makeFakeDistDir(): string {
 }
 
 describe("HELP", () => {
-  it("documents the camera command and its discovery-critical flags", () => {
-    // An agent reads --help to learn how to drive the camera, so the text
-    // must name the command and the flags it needs.
+  it("documents the commands and the camera's discovery-critical flags", () => {
+    // An agent reads --help to learn the commands and how to drive the camera,
+    // so the text must name them and the flags it needs.
+    expect(HELP).toContain("duet new");
+    expect(HELP).toContain("duet serve");
     expect(HELP).toContain("duet camera");
     expect(HELP).toContain("--to");
     expect(HELP).toContain("--no-animate");
     expect(HELP).toContain("--port");
     expect(HELP).toContain("framed");
+  });
+
+  it("documents the camera exit codes and failure shapes", () => {
+    // The failure contract must be learnable from --help alone.
+    expect(HELP).toContain("missing");
+    expect(HELP).toContain("exit 1");
+    expect(HELP).toContain("exit 2");
+  });
+
+  it("does not leak the internal 'camera client' wording in the --port help", () => {
+    expect(HELP).not.toContain("camera client");
   });
 
   it("is printed by the binary for --help on stdout, exit 0", async () => {
@@ -307,8 +320,70 @@ describe("HELP", () => {
     const out = await new Response(proc.stdout).text();
     const code = await proc.exited;
     expect(code).toBe(0);
+    expect(out).toContain("duet serve");
     expect(out).toContain("duet camera");
     expect(out).toContain("--to");
+  });
+});
+
+describe("runNew", () => {
+  it("creates a valid empty scene and reports the path, exit 0", () => {
+    tmpDir = makeTmpDir();
+    const filePath = path.join(tmpDir, "fresh.excalidraw");
+
+    const result = runNew(filePath);
+
+    expect(result.code).toBe(0);
+    expect(result.stdout ?? "").toContain(filePath);
+    expect(fs.existsSync(filePath)).toBe(true);
+    const contents = JSON.parse(fs.readFileSync(filePath, "utf8"));
+    expect(contents.type).toBe("excalidraw");
+    expect(Array.isArray(contents.elements)).toBe(true);
+  });
+
+  it("refuses to clobber an existing file, exit 1, and leaves bytes untouched", () => {
+    tmpDir = makeTmpDir();
+    const filePath = path.join(tmpDir, "existing.excalidraw");
+    const original = JSON.stringify({ type: "excalidraw", elements: [{ id: "keep" }] });
+    fs.writeFileSync(filePath, original, "utf8");
+
+    const result = runNew(filePath);
+
+    expect(result.code).toBe(1);
+    expect(result.stderr ?? "").toContain("already exists");
+    expect(fs.readFileSync(filePath, "utf8")).toBe(original);
+  });
+
+  it("errors with usage when no path is given, exit 1", () => {
+    const result = runNew(undefined);
+    expect(result.code).toBe(1);
+    expect(result.stderr ?? "").toContain("file path");
+  });
+});
+
+describe("serveError", () => {
+  it("returns null (safe to serve) when the file exists", () => {
+    tmpDir = makeTmpDir();
+    const filePath = path.join(tmpDir, "real.excalidraw");
+    fs.writeFileSync(filePath, JSON.stringify({ type: "excalidraw", elements: [] }), "utf8");
+
+    expect(serveError(filePath)).toBeNull();
+  });
+
+  it("errors on a missing file and points at `duet new`, exit 1", () => {
+    tmpDir = makeTmpDir();
+    const filePath = path.join(tmpDir, "ghost.excalidraw");
+
+    const result = serveError(filePath);
+    expect(result?.code).toBe(1);
+    expect(result?.stderr ?? "").toContain("no such scene");
+    expect(result?.stderr ?? "").toContain("duet new");
+  });
+
+  it("errors with usage when no path is given, exit 1", () => {
+    const result = serveError(undefined);
+    expect(result?.code).toBe(1);
+    expect(result?.stderr ?? "").toContain("file path");
   });
 });
 
