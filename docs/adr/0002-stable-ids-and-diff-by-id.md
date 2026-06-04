@@ -1,6 +1,6 @@
 # ADR-0002: Stable element ids and diff-by-id as the sync mechanism
 
-**Status:** Accepted
+**Status:** Accepted (amended by ADR-0007)
 **Date:** 2026-06-03
 
 ## Context
@@ -25,3 +25,11 @@ We will give every agent-authored element a deterministic id and synchronize by 
 - **Easier:** the agent can read intent from the diff ("this box moved right → give it room").
 - **Harder / accepted cost:** the design is coupled to Excalidraw preserving ids across the round-trip. If a future Excalidraw version reassigned ids or broke bound-text bindings, the sync mechanism would break. This is the single most load-bearing assumption in Duet.
 - **Accepted cost:** `version`/`versionNonce` churn on every edit (including no-ops), so diffing on them is forbidden; the agent must diff on meaningful fields only. Human-drawn elements carry random ids the agent cannot rename without risking their bindings, so the agent leaves them alone.
+
+## Amendment (ADR-0007)
+
+The "forbidden to use `version`" rule above applies to **change detection** (the
+diff that reads what the human changed). ADR-0007 carves out a second, distinct
+job: `version`/`versionNonce` *are* used as the **merge tiebreaker** when two
+writers hold the same element id. Diffing on version is still forbidden; resolving
+a merge conflict by version is required. See ADR-0007.
