@@ -3,7 +3,7 @@ import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
 import { ensureScene, bootstrap } from "./cli";
-import { load } from "./load";
+import { open } from "./open";
 
 let tmpDir: string;
 let servers: Array<{ stop(): void }> = [];
@@ -260,7 +260,7 @@ describe("agent save reaches watcher and broadcasts (issue #7 AC4)", () => {
     await new Promise((r) => setTimeout(r, 250));
 
     // Agent loads the file and saves with a new element — no guard involved.
-    const scene = load(filePath);
+    const scene = open(filePath);
     const elements = scene.list();
     elements.push({ id: "agent-el", type: "rectangle", x: 0, y: 0, width: 50, height: 50 } as any);
 
