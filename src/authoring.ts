@@ -59,6 +59,25 @@ function baseEl(ink: string, e: El): El {
   };
 }
 
+export interface PipelineOpts {
+  /** X position of the first box. Default: 0 */
+  startX?: number;
+  /** Y position of all boxes. Default: 0 */
+  startY?: number;
+  /** Width of each box. Default: 120 */
+  boxW?: number;
+  /** Height of each box. Default: 60 */
+  boxH?: number;
+  /** Gap between adjacent boxes. Default: 40 */
+  gap?: number;
+  /** Font size for box labels. Default: 14 */
+  fontSize?: number;
+  /** Color family for all boxes. Default: PALETTE.light.blue */
+  fam?: Family;
+  /** Id prefix for boxes and arrows. Default: "pipe" */
+  idPrefix?: string;
+}
+
 export interface Verbs {
   text(id: string, x: number, y: number, t: string, fontSize: number, color?: string): void;
   labeledRect(
@@ -80,6 +99,11 @@ export interface Verbs {
   ): void;
   zone(id: string, x: number, y: number, width: number, height: number, fam: Family): void;
   raw(e: El): void;
+  /**
+   * Place N evenly-spaced labeled boxes and connect each adjacent pair with a
+   * bound arrow. Only neighbors (i → i+1) are connected; no crossing diagonals.
+   */
+  pipeline(labels: string[], opts?: PipelineOpts): void;
 }
 
 // Build the authoring verbs over an EXTERNAL elements array. Both scene()
@@ -378,7 +402,35 @@ export function makeVerbs(els: El[], opts: { dark?: boolean } = {}): Verbs {
   // Escape hatch for ellipse/diamond/etc.
   const raw = (e: El) => els.push(base(e));
 
-  return { text, labeledRect, arrow, connect, zone, raw };
+  // Place N evenly-spaced labeled boxes and connect adjacent pairs.
+  const pipeline = (labels: string[], opts: PipelineOpts = {}) => {
+    const {
+      startX = 0,
+      startY = 0,
+      boxW = 120,
+      boxH = 60,
+      gap = 40,
+      fontSize = 14,
+      fam = PALETTE.light.blue,
+      idPrefix = "pipe",
+    } = opts;
+
+    const step = boxW + gap;
+
+    // Place all boxes
+    for (let i = 0; i < labels.length; i++) {
+      const boxId = `${idPrefix}_${i}`;
+      labeledRect(boxId, startX + i * step, startY, boxW, boxH, fam, labels[i], fontSize);
+    }
+
+    // Connect adjacent pairs using existing connect verb (real bindings)
+    for (let i = 0; i < labels.length - 1; i++) {
+      const arrowId = `${idPrefix}_arr_${i}`;
+      connect(arrowId, `${idPrefix}_${i}`, `${idPrefix}_${i + 1}`);
+    }
+  };
+
+  return { text, labeledRect, arrow, connect, zone, raw, pipeline };
 }
 
 export function scene(opts: { dark?: boolean } = {}) {
