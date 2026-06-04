@@ -212,7 +212,44 @@ describe("browser → file write-back (save message)", () => {
     expect(fs.readdirSync(sceneDir).filter((f) => f.endsWith(".tmp"))).toEqual([]);
   });
 
-  it("a browser save fans out to other connected clients but not the sender (B1)", async () => {
+  it("reconciles a stale browser save against a concurrent agent write (reverse race, #17)", async () => {
+    const dir = setup();
+    const filePath = makeSceneFile();
+    const { server } = createServer({ port: 0, distDir: dir, filePath, echoGuard: new EchoGuard() });
+    addCleanup(() => server.stop(true));
+
+    // The agent wrote [base, A_agent] to the file. The browser's debounced save
+    // was captured BEFORE A_agent existed, so it only knows [base, H_human].
+    const base = { id: "base", type: "rectangle", version: 1, versionNonce: 1 };
+    const aAgent = { id: "A_agent", type: "ellipse", version: 1, versionNonce: 1 };
+    fs.writeFileSync(
+      filePath,
+      JSON.stringify({ type: "excalidraw", elements: [base, aAgent], appState: {} }),
+      "utf8",
+    );
+
+    const ws = new WebSocket(`ws://localhost:${server.port}/`);
+    addCleanup(() => ws.close());
+    await wsOpen(ws);
+    await nextMessage(ws); // consume replay
+
+    const hHuman = { id: "H_human", type: "diamond", version: 2, versionNonce: 7 };
+    ws.send(JSON.stringify({ type: "save", elements: [base, hHuman], appState: {} }));
+
+    // Poll the file until the human's element lands.
+    let onDisk: any;
+    for (let i = 0; i < 100; i++) {
+      onDisk = JSON.parse(fs.readFileSync(filePath, "utf8"));
+      if (onDisk.elements.some((e: any) => e.id === "H_human")) break;
+      await new Promise((r) => setTimeout(r, 20));
+    }
+    const ids = onDisk.elements.map((e: any) => e.id);
+    expect(ids).toContain("base"); // shared id, unchanged
+    expect(ids).toContain("A_agent"); // agent's concurrent write SURVIVED
+    expect(ids).toContain("H_human"); // browser's new element APPLIED
+  });
+
+  it("a browser save broadcasts the merged scene to ALL tabs including the sender (B1, #17)", async () => {
     const dir = setup();
     const filePath = makeSceneFile();
     const { server } = createServer({ port: 0, distDir: dir, filePath, echoGuard: new EchoGuard() });
@@ -232,16 +269,26 @@ describe("browser → file write-back (save message)", () => {
 
     const elements = [{ id: "drawn", type: "rectangle" }];
 
-    // tab B must get the fan-out; tab A must NOT bounce (publish excludes sender).
+    // ADR-0007: the merged scene reaches EVERY tab, the sender included, because
+    // the merge can differ from what the sender sent. The client's
+    // isApplyingRemote guard prevents a save-loop (server side: a single
+    // broadcast, not a storm).
     const otherMsg = nextMessage(other);
-    const senderBounce = nextMessage(sender, 300).then(() => "bounced").catch(() => "silent");
+    const senderMsg = nextMessage(sender);
 
     sender.send(JSON.stringify({ type: "save", elements, appState: {} }));
 
-    const msg = (await otherMsg) as { type: string; scene: { elements: unknown[] } };
-    expect(msg.type).toBe("scene");
-    expect(msg.scene.elements).toEqual(elements);
+    const oMsg = (await otherMsg) as { type: string; scene: { elements: unknown[] } };
+    const sMsg = (await senderMsg) as { type: string; scene: { elements: unknown[] } };
+    expect(oMsg.type).toBe("scene");
+    expect(oMsg.scene.elements).toEqual(elements);
+    // The sender ALSO receives the broadcast, with the merged result.
+    expect(sMsg.type).toBe("scene");
+    expect(sMsg.scene.elements).toEqual(elements);
 
-    expect(await senderBounce).toBe("silent");
+    // No storm: after the single broadcast the sender stays quiet (one message,
+    // not an infinite loop).
+    const secondBounce = nextMessage(sender, 300).then(() => "stormed").catch(() => "quiet");
+    expect(await secondBounce).toBe("quiet");
   });
 });
