@@ -3,6 +3,8 @@ import { Excalidraw, CaptureUpdateAction, getSceneVersion } from "@excalidraw/ex
 import "@excalidraw/excalidraw/index.css";
 import { shouldPersistEdit, APP_STATE_WHITELIST } from "./writeback";
 import { flushPendingScene } from "./first-load";
+import { mergeRemoteScene } from "./client-merge";
+import type { El } from "./reconcile";
 
 type ExcalidrawAPI = {
   updateScene: (sceneData: {
@@ -65,7 +67,14 @@ export default function App() {
       elements?: unknown[];
       appState?: Record<string, unknown> | null;
     };
-    const elements = scene.elements ?? [];
+    const remoteElements = scene.elements ?? [];
+    // Layer the elements currently on the canvas (the local view) over the
+    // arriving remote scene by id + version (#18, ADR-0007 "Client merge"), so a
+    // human element drawn but not yet debounce-saved (a fresh local-only id) is
+    // not dropped from view until its pending save round-trips. On first load the
+    // canvas is empty, so this is exactly the remote scene (no flash).
+    const localElements = (api.getSceneElements() ?? []) as El[];
+    const elements = mergeRemoteScene(remoteElements as El[], localElements);
     // Mark that we are applying a remote scene so the onChange(s) updateScene
     // fires are absorbed, not bounced back as a "save". updateScene re-stamps
     // versions, so we cannot rely on the incoming version alone (the post-apply
