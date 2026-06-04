@@ -29,6 +29,23 @@ browser  --WS "save"-->  server  --atomic write-->  scene.excalidraw  (agent rea
 - **Source tagging** lets the client flash "Agent updated the canvas" only on
   agent edits, not on your own.
 
+## Camera — the agent points your view
+
+When the agent changes the scene it can also pull your view to the change, so you
+never hunt for what just happened. The agent runs:
+
+```sh
+duet camera fit                 # frame the whole scene
+duet camera fit --to id1,id2    # frame just these elements
+duet camera fit --no-animate    # jump instead of a smooth move
+```
+
+Your view tweens (~400ms) to the new frame, and every open tab moves the same
+way. It is **view only**: the camera never writes the file (ADR-0005), so your
+scene bytes don't change and there's no "agent updated" flash. If the agent asks
+for an element id that isn't there, nothing moves and it's told which id was
+missing, so your view never lands somewhere you didn't expect.
+
 ## Develop
 
 ```sh
@@ -48,6 +65,7 @@ file-sync server is not running, so use `bun run duet` to test sync.
 | `src/server.ts` | Bun HTTP + WebSocket server, serves `dist/`, broadcasts scenes |
 | `src/watch.ts` | watches the file, parses, keeps last-good on malformed writes |
 | `src/writeback.ts` | atomic write, appState whitelist, echo guard |
+| `src/camera.ts` | pure resolver for `camera fit` (view path, never touches the file) |
 | `src/App.tsx` | Excalidraw client, applies remote scenes, sends saves |
 | `src/authoring.ts` | scene-building helpers for agent edits |
 
