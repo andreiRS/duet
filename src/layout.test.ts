@@ -1,8 +1,8 @@
 // Tests for layout helpers: bbox, centerX, centerY, pipeline
 import { describe, expect, test } from "bun:test";
-import { bbox, centerX, centerY } from "./layout.ts";
-import { scene, PALETTE } from "./authoring.ts";
-import type { El } from "./scene-types.ts";
+import { bbox, centerX, centerY } from "./layout";
+import { scene } from "./authoring";
+import type { El } from "./scene-types";
 
 // Helper: build a minimal rectangle element
 function rect(id: string, x: number, y: number, w: number, h: number): El {
@@ -114,8 +114,6 @@ describe("centerY: shift set so bbox center-y lands on coord", () => {
 });
 
 // ---- Behavior 3: pipeline() verb ----
-
-const blue = PALETTE.light.blue;
 
 describe("pipeline: N evenly-spaced labeled boxes with bound connecting arrows", () => {
   test("creates N boxes for N labels", () => {
