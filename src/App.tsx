@@ -49,6 +49,11 @@ export default function App() {
   // The first scene we apply is the file's existing content (initial load), not
   // an agent edit, so it must NOT flash. Only subsequent updates flash.
   const hasLoadedRef = useRef(false);
+  // Baseline for B2: the ids present in the LAST applied remote scene. Lets
+  // mergeRemoteScene tell a remote hard-delete (id was here before, gone now —
+  // drop the local copy) from a genuine in-progress local add (never in any
+  // remote — keep it). Client analog of the #16 write-path baseline diff.
+  const lastAppliedRemoteIdsRef = useRef<Set<string>>(new Set());
 
   function showFlash() {
     setFlashVisible(true);
@@ -80,7 +85,16 @@ export default function App() {
     // remote scene still holds that element ALIVE (lower version), the version
     // tiebreak keeps the tombstone and the element is not resurrected on canvas.
     const localElements = (api.getSceneElementsIncludingDeleted() ?? []) as El[];
-    const elements = mergeRemoteScene(remoteElements as El[], localElements);
+    const elements = mergeRemoteScene(
+      remoteElements as El[],
+      localElements,
+      lastAppliedRemoteIdsRef.current,
+    );
+    // Record this remote scene's ids as the baseline for the next apply (B2): a
+    // local-only id that was here but vanishes next time is a remote deletion.
+    lastAppliedRemoteIdsRef.current = new Set(
+      (remoteElements as El[]).map((e) => e.id as string),
+    );
     // Mark that we are applying a remote scene so the onChange(s) updateScene
     // fires are absorbed, not bounced back as a "save". updateScene re-stamps
     // versions, so we cannot rely on the incoming version alone (the post-apply

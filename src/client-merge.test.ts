@@ -82,3 +82,41 @@ test("a browser-deleted element is not resurrected by a stale remote scene", () 
   expect(merged[0].id).toBe("X");
   expect(merged[0].isDeleted).toBe(true);
 });
+
+// B2: the agent HARD-deletes an element (splices it out of the live array, so
+// reconcileForWrite drops it from disk and the broadcast omits it entirely — no
+// tombstone, unlike a browser delete). The element is still on the local canvas
+// as a local-only id. Without a baseline of the last-applied remote, applyScene
+// keeps every local-only id and the deleted element RESURRECTS. The baseline
+// (prevRemoteIds) lets the merge tell a remote deletion (id was in the previous
+// remote, gone from this one) from a genuine local add (id never in any remote).
+test("an agent hard-deleted element is dropped, not resurrected", () => {
+  // Previous remote held both A and X; the agent hard-deleted X.
+  const prevRemoteIds = new Set(["A", "X"]);
+  const remote = [{ id: "A", type: "rectangle", version: 2 }];
+  // X is still on the local canvas (local-only now that the remote omits it).
+  const local = [
+    { id: "A", type: "rectangle", version: 2 },
+    { id: "X", type: "ellipse", version: 1 },
+  ];
+
+  const merged = mergeRemoteScene(remote, local, prevRemoteIds);
+
+  expect(merged.map((e) => e.id)).toEqual(["A"]);
+});
+
+// B2 must NOT regress #18: an in-progress local add (a fresh id never present in
+// any remote) is kept even with a baseline, because it was never in prevRemote
+// so it cannot be a remote deletion.
+test("an in-progress local add survives even with a prior-remote baseline", () => {
+  const prevRemoteIds = new Set(["A"]);
+  const remote = [{ id: "A", type: "rectangle", version: 2 }];
+  const local = [
+    { id: "A", type: "rectangle", version: 2 },
+    { id: "humanInProgress", type: "ellipse", version: 1 },
+  ];
+
+  const merged = mergeRemoteScene(remote, local, prevRemoteIds);
+
+  expect(merged.map((e) => e.id).sort()).toEqual(["A", "humanInProgress"]);
+});
