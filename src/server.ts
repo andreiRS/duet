@@ -56,6 +56,10 @@ function isFile(filePath: string): boolean {
   }
 }
 
+// Polling constants for the write-then-frame race window (#21)
+const CAMERA_POLL_INTERVAL_MS = 50;
+const CAMERA_POLL_CEILING_MS = 400;
+
 export function createServer({
   port = 3737,
   distDir = "dist",
@@ -105,25 +109,52 @@ export function createServer({
 
         const toIds = to as string[] | undefined;
 
-        const elements = elementsOf(currentScene ?? { elements: [] }) as { id: string }[];
-
-        // Plain fit with no elements → nothing to frame
-        if (!toIds && elements.length === 0) {
-          return jsonResponse({ error: "nothing to frame" }, 422);
-        }
-
-        // --to: empty array → nothing to frame
+        // --to: empty array → nothing to frame (not a race, synchronous reject)
         if (toIds !== undefined && toIds.length === 0) {
           return jsonResponse({ error: "nothing to frame" }, 422);
         }
 
-        // --to: all-or-nothing validation
-        if (toIds !== undefined) {
-          const existingIds = new Set(elements.map((e) => e.id));
-          const missing = toIds.filter((id) => !existingIds.has(id));
-          if (missing.length > 0) {
-            return jsonResponse({ missing }, 422);
+        // Poll currentScene until validation passes or ceiling elapses.
+        // This absorbs the write-then-frame race: agent writes file, watcher
+        // updates currentScene asynchronously, so ids may arrive shortly.
+        const validationResult = await new Promise<Response | null>((resolve) => {
+          const deadline = Date.now() + CAMERA_POLL_CEILING_MS;
+
+          function check(): Response | null | undefined {
+            const els = elementsOf(currentScene ?? { elements: [] }) as { id: string }[];
+
+            if (toIds !== undefined) {
+              // --to: all-or-nothing
+              const existingIds = new Set(els.map((e) => e.id));
+              const missing = toIds.filter((id) => !existingIds.has(id));
+              if (missing.length === 0) return null; // pass
+              if (Date.now() >= deadline) return jsonResponse({ missing }, 422);
+              return undefined; // keep polling
+            } else {
+              // plain fit: need at least one element
+              if (els.length > 0) return null; // pass
+              if (Date.now() >= deadline) return jsonResponse({ error: "nothing to frame" }, 422);
+              return undefined; // keep polling
+            }
           }
+
+          // Fast path: no added latency when already valid
+          const immediate = check();
+          if (immediate === null) { resolve(null); return; }
+          if (immediate !== undefined) { resolve(immediate); return; }
+
+          const iv = setInterval(() => {
+            const result = check();
+            // undefined = still missing/empty, keep polling; null/Response = done
+            if (result !== undefined) {
+              clearInterval(iv);
+              resolve(result); // null = pass, Response = error
+            }
+          }, CAMERA_POLL_INTERVAL_MS);
+        });
+
+        if (validationResult !== null) {
+          return validationResult;
         }
 
         // Build and publish camera message (not a content path — no file write,
