@@ -249,6 +249,42 @@ describe("browser → file write-back (save message)", () => {
     expect(ids).toContain("H_human"); // browser's new element APPLIED
   });
 
+  it("the merged broadcast carries the agent's concurrent element the sender never sent (ADR-0007)", async () => {
+    const dir = setup();
+    const filePath = makeSceneFile();
+    const { server } = createServer({ port: 0, distDir: dir, filePath, echoGuard: new EchoGuard() });
+    addCleanup(() => server.stop(true));
+
+    // The agent wrote [base, A_agent] to disk during the browser's debounce
+    // window. The browser's stale save only knows [base, H_human].
+    const base = { id: "base", type: "rectangle", version: 1, versionNonce: 1 };
+    const aAgent = { id: "A_agent", type: "ellipse", version: 1, versionNonce: 1 };
+    fs.writeFileSync(
+      filePath,
+      JSON.stringify({ type: "excalidraw", elements: [base, aAgent], appState: {} }),
+      "utf8",
+    );
+
+    const ws = new WebSocket(`ws://localhost:${server.port}/`);
+    addCleanup(() => ws.close());
+    await wsOpen(ws);
+    await nextMessage(ws); // consume replay
+
+    const hHuman = { id: "H_human", type: "diamond", version: 2, versionNonce: 7 };
+
+    // ADR-0007 central claim: the sender does NOT just see its own snapshot
+    // echoed back — it receives the reconciled truth OVER THE WIRE, including
+    // the agent's concurrent element it never sent.
+    const senderMsg = nextMessage(ws);
+    ws.send(JSON.stringify({ type: "save", elements: [base, hHuman], appState: {} }));
+
+    const msg = (await senderMsg) as { type: string; scene: { elements: { id: string }[] } };
+    expect(msg.type).toBe("scene");
+    const ids = msg.scene.elements.map((e) => e.id);
+    expect(ids).toContain("A_agent"); // reconciled agent element the sender never sent
+    expect(ids).toContain("H_human"); // sender's own new element
+  });
+
   it("a browser save broadcasts the merged scene to ALL tabs including the sender (B1, #17)", async () => {
     const dir = setup();
     const filePath = makeSceneFile();

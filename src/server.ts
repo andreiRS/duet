@@ -85,7 +85,7 @@ export function createServer({
         // Replay current scene immediately
         ws.send(sceneMsg(currentScene));
       },
-      message(ws, data) {
+      message(_ws, data) {
         // Browser write-back: persist the human's edit to the same file the
         // agent reads. The echo guard records the bytes so the watcher skips the
         // resulting file event instead of rebroadcasting our own write.
