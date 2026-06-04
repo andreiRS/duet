@@ -10,6 +10,7 @@ import {
   hashContent,
   EchoGuard,
   writeSceneFile,
+  atomicWriteScene,
 } from "./writeback";
 
 describe("shouldPersist (version gate)", () => {
@@ -230,6 +231,56 @@ describe("writeSceneFile (atomic write + echo registration)", () => {
 
     const bytes = fs.readFileSync(filePath, "utf8");
     // The watcher will read these exact bytes and must recognize them as our echo.
+    expect(guard.consume(hashContent(bytes))).toBe(true);
+  });
+});
+
+// ─── Issue #7: atomicWriteScene — shared writer, no guard (AC2) ──────────────
+
+describe("atomicWriteScene (shared atomic writer, no guard — issue #7 AC2)", () => {
+  it("writes shaped scene atomically and returns shaped + bytes", () => {
+    const dir = makeTmpDir();
+    const filePath = path.join(dir, "scene.excalidraw");
+
+    const { shaped, bytes } = atomicWriteScene(filePath, { elements: [{ id: "x", type: "rectangle" }], appState: { scrollX: 9 } });
+
+    const onDisk = JSON.parse(fs.readFileSync(filePath, "utf8"));
+    expect(onDisk.type).toBe("excalidraw");
+    expect(onDisk.elements).toEqual([{ id: "x", type: "rectangle" }]);
+    expect(onDisk.appState).toEqual({}); // scrollX dropped by whitelist
+    expect(shaped).toEqual(onDisk);
+    expect(bytes).toBe(JSON.stringify(shaped, null, 2));
+  });
+
+  it("leaves no lingering .tmp file (atomic temp+rename)", () => {
+    const dir = makeTmpDir();
+    const filePath = path.join(dir, "scene.excalidraw");
+    atomicWriteScene(filePath, { elements: [], appState: {} });
+    const leftovers = fs.readdirSync(dir).filter((f) => f.endsWith(".tmp"));
+    expect(leftovers).toEqual([]);
+  });
+
+  it("does NOT record in any EchoGuard — agent writes are not echo-suppressed (AC3 contrast)", () => {
+    // When the agent uses atomicWriteScene directly (via save()), no guard is
+    // touched. A new EchoGuard will not have seen the written bytes, confirming
+    // the watcher will NOT suppress the agent's own write.
+    const dir = makeTmpDir();
+    const filePath = path.join(dir, "scene.excalidraw");
+    const { bytes } = atomicWriteScene(filePath, { elements: [], appState: {} });
+
+    const freshGuard = new EchoGuard();
+    // No record() was called, so consume returns false — not an echo.
+    expect(freshGuard.consume(hashContent(bytes))).toBe(false);
+  });
+
+  it("writeSceneFile still records bytes in the guard (server human-save path, AC3)", () => {
+    const dir = makeTmpDir();
+    const filePath = path.join(dir, "scene.excalidraw");
+    const guard = new EchoGuard();
+    writeSceneFile(filePath, { elements: [], appState: {} }, guard);
+
+    const bytes = fs.readFileSync(filePath, "utf8");
+    // Server's echo guard is armed: watcher will skip this write.
     expect(guard.consume(hashContent(bytes))).toBe(true);
   });
 });

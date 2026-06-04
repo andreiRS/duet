@@ -99,18 +99,17 @@ export class EchoGuard {
   }
 }
 
-// Atomically write the shaped scene to filePath (temp file + rename over target,
-// so no reader ever sees a half-written file) and register the exact bytes in
-// the echo guard so the resulting watcher event is recognized as our own.
-export function writeSceneFile(
+// Shared atomic writer: temp file + rename, no guard involved.
+// Both the agent path (save) and the server path (writeSceneFile) use this.
+// Returns the shaped scene and the exact bytes written so callers can record
+// in an EchoGuard if needed.
+export function atomicWriteScene(
   filePath: string,
   scene: SceneInput,
-  guard: EchoGuard,
   source = "duet",
-): ShapedScene {
+): { shaped: ShapedScene; bytes: string } {
   const shaped = shapeSceneForFile(scene, source);
   const bytes = JSON.stringify(shaped, null, 2);
-  guard.record(hashContent(bytes));
   // Unique tmp path per call: pid + timestamp alone can collide for two writes
   // in the same millisecond (the second would clobber the first's tmp file and
   // the loser's rename can ENOENT, silently losing a write). The random suffix
@@ -120,5 +119,19 @@ export function writeSceneFile(
     .toString("hex")}.tmp`;
   fs.writeFileSync(tmpPath, bytes, "utf8");
   fs.renameSync(tmpPath, filePath);
+  return { shaped, bytes };
+}
+
+// Atomically write the shaped scene to filePath and register the exact bytes in
+// the echo guard so the resulting watcher event is recognized as our own.
+// Used exclusively on the server's human-save path.
+export function writeSceneFile(
+  filePath: string,
+  scene: SceneInput,
+  guard: EchoGuard,
+  source = "duet",
+): ShapedScene {
+  const { shaped, bytes } = atomicWriteScene(filePath, scene, source);
+  guard.record(hashContent(bytes));
   return shaped;
 }
