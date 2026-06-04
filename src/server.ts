@@ -91,22 +91,36 @@ export function createServer({
         }
 
         const { to, animate, duration } = body as {
-          to?: string[];
+          to?: unknown;
           animate?: unknown;
           duration?: unknown;
         };
 
+        // Runtime guard: if to is present it must be an array of strings
+        if (to !== undefined) {
+          if (!Array.isArray(to) || !(to as unknown[]).every((item) => typeof item === "string")) {
+            return jsonResponse({ error: "to must be an array of strings" }, 400);
+          }
+        }
+
+        const toIds = to as string[] | undefined;
+
         const elements = elementsOf(currentScene ?? { elements: [] }) as { id: string }[];
 
         // Plain fit with no elements → nothing to frame
-        if (!to && elements.length === 0) {
+        if (!toIds && elements.length === 0) {
+          return jsonResponse({ error: "nothing to frame" }, 422);
+        }
+
+        // --to: empty array → nothing to frame
+        if (toIds !== undefined && toIds.length === 0) {
           return jsonResponse({ error: "nothing to frame" }, 422);
         }
 
         // --to: all-or-nothing validation
-        if (to !== undefined) {
+        if (toIds !== undefined) {
           const existingIds = new Set(elements.map((e) => e.id));
-          const missing = to.filter((id) => !existingIds.has(id));
+          const missing = toIds.filter((id) => !existingIds.has(id));
           if (missing.length > 0) {
             return jsonResponse({ missing }, 422);
           }
@@ -115,7 +129,7 @@ export function createServer({
         // Build and publish camera message (not a content path — no file write,
         // no echo guard, no scene version bump)
         const cameraMsg: Record<string, unknown> = { type: "camera", op: "fit" };
-        if (to !== undefined) cameraMsg.ids = to;
+        if (toIds !== undefined) cameraMsg.ids = toIds;
         if (animate !== undefined) cameraMsg.animate = animate;
         if (duration !== undefined) cameraMsg.duration = duration;
 

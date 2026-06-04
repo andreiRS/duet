@@ -172,6 +172,29 @@ describe("HTTP static serving", () => {
 
 // ─── Slice 20: POST /camera validation + fan-out ─────────────────────────────
 
+// Helper: POST to /camera with a JSON body
+function postCamera(port: number | undefined, body: unknown): Promise<Response> {
+  return fetch(`http://localhost:${port}/camera`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+}
+
+// Helper: collect all {type:"camera"} messages received after setup until
+// `done` resolves. Returns the collected messages.
+async function collectCameraMessages(ws: WebSocket, done: Promise<unknown>): Promise<unknown[]> {
+  const msgs: unknown[] = [];
+  const listener = (e: MessageEvent) => {
+    const parsed = JSON.parse(e.data);
+    if ((parsed as { type?: string }).type === "camera") msgs.push(parsed);
+  };
+  ws.addEventListener("message", listener);
+  await done;
+  ws.removeEventListener("message", listener);
+  return msgs;
+}
+
 describe("POST /camera — fit on empty scene is rejected", () => {
   it("returns 4xx and publishes nothing when scene has no elements", async () => {
     const dir = setup();
@@ -186,17 +209,54 @@ describe("POST /camera — fit on empty scene is rejected", () => {
     await wsOpen(ws);
     await nextMessage(ws); // consume replay
 
-    const res = await fetch(`http://localhost:${server.port}/camera`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ op: "fit" }),
-    });
+    // Register collector BEFORE the POST; await fetch to know server is done
+    const collected = collectCameraMessages(ws, postCamera(server.port, { op: "fit" }));
+    const res = await postCamera(server.port, { op: "fit" });
 
     expect(res.status).toBeGreaterThanOrEqual(400);
+    expect(await collected).toHaveLength(0);
+  });
+});
 
-    // No camera message should arrive
-    const silence = nextMessage(ws, 200).then(() => "got-message").catch(() => "quiet");
-    expect(await silence).toBe("quiet");
+describe("POST /camera — fit with empty to array is rejected", () => {
+  it("returns 422 and publishes no camera message when to:[] (nothing to frame)", async () => {
+    const dir = setup();
+    const { server, setScene } = createServer({ port: 0, distDir: dir });
+    addCleanup(() => server.stop(true));
+
+    setScene({ elements: [{ id: "a" }], appState: {} });
+
+    const ws = new WebSocket(`ws://localhost:${server.port}/`);
+    addCleanup(() => ws.close());
+    await wsOpen(ws);
+    await nextMessage(ws); // consume replay
+
+    const collected = collectCameraMessages(ws, postCamera(server.port, { op: "fit", to: [] }));
+    const res = await postCamera(server.port, { op: "fit", to: [] });
+
+    expect(res.status).toBe(422);
+    expect(await collected).toHaveLength(0);
+  });
+});
+
+describe("POST /camera — fit with non-string to items is rejected", () => {
+  it("returns 400 and publishes no camera message when to contains non-strings", async () => {
+    const dir = setup();
+    const { server, setScene } = createServer({ port: 0, distDir: dir });
+    addCleanup(() => server.stop(true));
+
+    setScene({ elements: [{ id: "a" }], appState: {} });
+
+    const ws = new WebSocket(`ws://localhost:${server.port}/`);
+    addCleanup(() => ws.close());
+    await wsOpen(ws);
+    await nextMessage(ws); // consume replay
+
+    const collected = collectCameraMessages(ws, postCamera(server.port, { op: "fit", to: [1, 2] }));
+    const res = await postCamera(server.port, { op: "fit", to: [1, 2] });
+
+    expect(res.status).toBe(400);
+    expect(await collected).toHaveLength(0);
   });
 });
 
@@ -215,11 +275,7 @@ describe("POST /camera — fit with --to (all ids present)", () => {
 
     const cameraMsg = nextMessage(ws);
 
-    const res = await fetch(`http://localhost:${server.port}/camera`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ op: "fit", to: ["a"] }),
-    });
+    const res = await postCamera(server.port, { op: "fit", to: ["a"] });
     const body = await res.json() as { framed: number };
 
     expect(res.status).toBe(200);
@@ -245,19 +301,38 @@ describe("POST /camera — fit with --to (missing ids)", () => {
     await wsOpen(ws);
     await nextMessage(ws); // consume replay
 
-    const res = await fetch(`http://localhost:${server.port}/camera`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ op: "fit", to: ["a", "nonexistent"] }),
-    });
+    // Register collector BEFORE the POST; await fetch to know server is done
+    const collected = collectCameraMessages(ws, postCamera(server.port, { op: "fit", to: ["a", "nonexistent"] }));
+    const res = await postCamera(server.port, { op: "fit", to: ["a", "nonexistent"] });
     const body = await res.json() as { missing: string[] };
 
     expect(res.status).toBeGreaterThanOrEqual(400);
     expect(body.missing).toEqual(["nonexistent"]);
+    expect(await collected).toHaveLength(0);
+  });
+});
 
-    // No camera message published
-    const silence = nextMessage(ws, 200).then(() => "got-message").catch(() => "quiet");
-    expect(await silence).toBe("quiet");
+describe("POST /camera — animate and duration are forwarded into the published message", () => {
+  it("published camera message includes animate:false and duration:0 when sent", async () => {
+    const dir = setup();
+    const { server, setScene } = createServer({ port: 0, distDir: dir });
+    addCleanup(() => server.stop(true));
+
+    setScene({ elements: [{ id: "a" }], appState: {} });
+
+    const ws = new WebSocket(`ws://localhost:${server.port}/`);
+    addCleanup(() => ws.close());
+    await wsOpen(ws);
+    await nextMessage(ws); // consume replay
+
+    const cameraMsg = nextMessage(ws);
+    const res = await postCamera(server.port, { op: "fit", animate: false, duration: 0 });
+
+    expect(res.status).toBe(200);
+    const msg = await cameraMsg as { type: string; animate: boolean; duration: number };
+    expect(msg.type).toBe("camera");
+    expect(msg.animate).toBe(false);
+    expect(msg.duration).toBe(0);
   });
 });
 
@@ -275,11 +350,7 @@ describe("POST /camera — framed reflects live client count", () => {
     await nextMessage(ws); // consume replay
 
     // One tab connected → framed should be 1
-    const res1 = await fetch(`http://localhost:${server.port}/camera`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ op: "fit" }),
-    });
+    const res1 = await postCamera(server.port, { op: "fit" });
     expect((await res1.json() as { framed: number }).framed).toBe(1);
 
     // Close the tab and wait for the server to process the close
@@ -287,11 +358,7 @@ describe("POST /camera — framed reflects live client count", () => {
     await new Promise((r) => setTimeout(r, 50));
 
     // Zero tabs → framed should be 0
-    const res2 = await fetch(`http://localhost:${server.port}/camera`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ op: "fit" }),
-    });
+    const res2 = await postCamera(server.port, { op: "fit" });
     expect((await res2.json() as { framed: number }).framed).toBe(0);
   });
 });
@@ -305,11 +372,7 @@ describe("POST /camera — zero connected tabs", () => {
     setScene({ elements: [{ id: "a" }], appState: {} });
 
     // No WS clients connected at all
-    const res = await fetch(`http://localhost:${server.port}/camera`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ op: "fit" }),
-    });
+    const res = await postCamera(server.port, { op: "fit" });
     const body = await res.json() as { framed: number };
 
     expect(res.status).toBe(200);
@@ -332,11 +395,7 @@ describe("POST /camera — basic fit on non-empty scene", () => {
 
     const cameraMsg = nextMessage(ws);
 
-    const res = await fetch(`http://localhost:${server.port}/camera`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ op: "fit" }),
-    });
+    const res = await postCamera(server.port, { op: "fit" });
     const body = await res.json() as { framed: number };
 
     expect(res.status).toBe(200);
