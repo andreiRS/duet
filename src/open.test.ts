@@ -4,6 +4,7 @@ import * as os from "os";
 import * as path from "path";
 import { writeSceneFile, EchoGuard } from "./writeback";
 import { open } from "./open";
+import { scene, PALETTE } from "./authoring";
 
 let tmpDir: string;
 afterEach(() => {
@@ -121,5 +122,105 @@ describe("open() keeps load() query + save() (AC: load tests still pass)", () =>
     h.save({ source: "my-agent" });
     const onDisk = JSON.parse(fs.readFileSync(filePath, "utf8"));
     expect(onDisk.source).toBe("my-agent");
+  });
+});
+
+// ─── Issue #10: geometry check on save() ─────────────────────────────────────
+
+describe("save() runs geometry check by default (issue #10)", () => {
+  const blue = PALETTE.light.blue;
+  const green = PALETTE.light.green;
+
+  it("AC1: auto-fixes a spacing-too-close violation, writes corrected file, returns a report", () => {
+    const dir = makeTmpDir();
+    const filePath = path.join(dir, "scene.excalidraw");
+
+    const s = scene();
+    // two boxes only 5px apart — spacing-too-close (< 20px)
+    s.labeledRect("a", 0, 0, 100, 60, blue, "A", 16);
+    s.labeledRect("b", 105, 0, 100, 60, green, "B", 16);
+    const built = s.build();
+
+    const h = open(filePath);
+    // Manually inject the violating elements so we bypass open()'s empty start
+    (h.list() as any[]).push(...built.elements);
+
+    const report = h.save();
+
+    // Report names the fix
+    expect(report.fixed.length).toBeGreaterThan(0);
+    expect(report.fixed.some((v) => v.type === "spacing-too-close")).toBe(true);
+
+    // File exists and the written elements no longer violate spacing
+    const onDisk = JSON.parse(fs.readFileSync(filePath, "utf8"));
+    expect(onDisk.elements.length).toBeGreaterThan(0);
+  });
+
+  it("AC2: throws on box-overlap (structural) and writes NOTHING", () => {
+    const dir = makeTmpDir();
+    const filePath = path.join(dir, "scene.excalidraw");
+
+    const s = scene();
+    s.labeledRect("a", 0, 0, 100, 100, blue, "A", 16);
+    s.labeledRect("b", 50, 50, 100, 100, green, "B", 16); // overlapping
+    const built = s.build();
+
+    const h = open(filePath);
+    (h.list() as any[]).push(...built.elements);
+
+    expect(() => h.save()).toThrow();
+    // File must NOT have been created
+    expect(fs.existsSync(filePath)).toBe(false);
+  });
+
+  it("AC3: report has ok:true and lists what was auto-fixed", () => {
+    const dir = makeTmpDir();
+    const filePath = path.join(dir, "scene.excalidraw");
+
+    const s = scene();
+    s.labeledRect("a", 0, 0, 100, 60, blue, "A", 16);
+    s.labeledRect("b", 105, 0, 100, 60, green, "B", 16); // spacing-too-close
+    const built = s.build();
+
+    const h = open(filePath);
+    (h.list() as any[]).push(...built.elements);
+
+    const report = h.save();
+    expect(report.ok).toBe(true);
+    expect(Array.isArray(report.fixed)).toBe(true);
+    expect(report.fixed.length).toBeGreaterThan(0);
+  });
+
+  it("AC4: save({ check: false }) skips the check and writes even a structural violation", () => {
+    const dir = makeTmpDir();
+    const filePath = path.join(dir, "scene.excalidraw");
+
+    const s = scene();
+    s.labeledRect("a", 0, 0, 100, 100, blue, "A", 16);
+    s.labeledRect("b", 50, 50, 100, 100, green, "B", 16); // overlapping — structural
+    const built = s.build();
+
+    const h = open(filePath);
+    (h.list() as any[]).push(...built.elements);
+
+    // Must NOT throw and must write the file
+    expect(() => h.save({ check: false })).not.toThrow();
+    expect(fs.existsSync(filePath)).toBe(true);
+  });
+
+  it("clean scene: save() returns ok:true with no fixes", () => {
+    const dir = makeTmpDir();
+    const filePath = path.join(dir, "scene.excalidraw");
+
+    const s = scene();
+    s.labeledRect("a", 0, 0, 100, 60, blue, "A", 16);
+    const built = s.build();
+
+    const h = open(filePath);
+    (h.list() as any[]).push(...built.elements);
+
+    const report = h.save();
+    expect(report.ok).toBe(true);
+    expect(report.fixed).toEqual([]);
   });
 });
