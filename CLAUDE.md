@@ -72,3 +72,5 @@ serve`.
   a test, e.g. "a browser save fans out to other clients but not the sender".
 - Backlog and known issues: `docs/v0.2-improvements.md`. Design notes: `docs/`.
 - Commit as the real git identity, never a "Duet" `--author` override.
+- Never commit images or binary files (`.png`, `.jpg`, screenshots, etc.)
+  unless explicitly asked. Host them externally and link instead.
