@@ -33,7 +33,7 @@ function isFile(filePath: string): boolean {
 }
 
 export function createServer({
-  port = 3000,
+  port = 3737,
   distDir = "dist",
   filePath,
   echoGuard,
