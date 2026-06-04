@@ -54,6 +54,18 @@ export function open(filePath: string): OpenScene {
         { cause }
       );
     }
+    // Valid JSON but not an Excalidraw scene (null, number, string, array, or an
+    // object with no elements array) — fail fast so a later save() can't silently
+    // overwrite the corrupt-but-existing file with an empty scene.
+    if (
+      parsed === null ||
+      typeof parsed !== "object" ||
+      !Array.isArray((parsed as { elements?: unknown }).elements)
+    ) {
+      throw new Error(
+        `open(${filePath}): malformed .excalidraw (not a valid scene: missing elements array)`
+      );
+    }
   }
   const elements: El[] = parsed ? elementsOf(parsed) : [];
   const appState = parsed?.appState ?? {};
