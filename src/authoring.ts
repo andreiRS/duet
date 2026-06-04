@@ -122,7 +122,9 @@ export function makeVerbs(els: El[], opts: { dark?: boolean } = {}): Verbs {
       ...merged,
       type: "text",
       strokeWidth: 1,
-      fontFamily: 1,
+      // Excalifont (5), Excalidraw's current default handdrawn font, not Virgil
+      // (1, legacy) or Helvetica (2, plain sans). See #26.
+      fontFamily: 5,
       textAlign: (e.textAlign ?? "left") as string,
       verticalAlign: (e.verticalAlign ?? "top") as string,
       containerId: (e.containerId ?? null) as string | null,
