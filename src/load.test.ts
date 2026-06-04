@@ -3,7 +3,7 @@ import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
 import { writeSceneFile, EchoGuard } from "./writeback";
-import { load, type LoadedScene } from "./load";
+import { open, type OpenScene } from "./open";
 
 let tmpDir: string;
 afterEach(() => {
@@ -30,7 +30,7 @@ describe("load round-trip (AC1: no elements dropped or mutated)", () => {
     ];
     const filePath = writeTmp(dir, elements);
 
-    const loaded = load(filePath);
+    const loaded = open(filePath);
     expect(loaded.list()).toEqual(elements);
   });
 
@@ -39,7 +39,7 @@ describe("load round-trip (AC1: no elements dropped or mutated)", () => {
     const humanEl = { id: "human-xyz-abc", type: "freedraw", x: 5, y: 5, points: [[0, 0], [1, 1]] };
     const filePath = writeTmp(dir, [humanEl]);
 
-    const loaded = load(filePath);
+    const loaded = open(filePath);
     expect(loaded.list()[0]).toEqual(humanEl);
   });
 });
@@ -50,7 +50,7 @@ describe("byId (AC2: hit and miss)", () => {
     const el = { id: "target", type: "rectangle", x: 0, y: 0 };
     const filePath = writeTmp(dir, [el]);
 
-    const loaded = load(filePath);
+    const loaded = open(filePath);
     expect(loaded.byId("target")).toEqual(el);
   });
 
@@ -58,7 +58,7 @@ describe("byId (AC2: hit and miss)", () => {
     const dir = makeTmpDir();
     const filePath = writeTmp(dir, [{ id: "a", type: "rectangle" }]);
 
-    const loaded = load(filePath);
+    const loaded = open(filePath);
     expect(loaded.byId("does-not-exist")).toBeUndefined();
   });
 });
@@ -73,7 +73,7 @@ describe("list (AC3: all elements)", () => {
     ];
     const filePath = writeTmp(dir, elements);
 
-    const loaded = load(filePath);
+    const loaded = open(filePath);
     expect(loaded.list()).toHaveLength(3);
     expect(loaded.list().map((e) => e.id)).toEqual(["e1", "e2", "e3"]);
   });
@@ -88,7 +88,7 @@ describe("byte-stable save (AC4: changing one element leaves others untouched)",
     const filePath = writeTmp(dir, [agentEl, humanEl, anotherEl]);
 
     // Load, mutate one element, save back
-    const loaded = load(filePath);
+    const loaded = open(filePath);
     const target = loaded.byId("agent-box")!;
     target.label = "updated";
     target.x = 99;
@@ -96,7 +96,7 @@ describe("byte-stable save (AC4: changing one element leaves others untouched)",
     loaded.save();
 
     // Re-load and check
-    const reloaded = load(filePath);
+    const reloaded = open(filePath);
     const reloadedElements = reloaded.list();
 
     // The mutated element is changed
@@ -124,7 +124,7 @@ describe("save({ source? }) API — no EchoGuard argument (issue #7 AC1)", () =>
     const el = { id: "ag1", type: "rectangle", x: 0, y: 0 };
     const filePath = writeTmp(dir, [el]);
 
-    const loaded = load(filePath);
+    const loaded = open(filePath);
     const target = loaded.byId("ag1")!;
     target.x = 42;
 
@@ -139,11 +139,11 @@ describe("save({ source? }) API — no EchoGuard argument (issue #7 AC1)", () =>
 
   it("save() type signature does NOT accept an EchoGuard (guard param is gone)", () => {
     // This is a compile-time / type-level test enforced at runtime:
-    // We verify the LoadedScene interface has save taking no guard.
+    // We verify the OpenScene interface has save taking no guard.
     // The TypeScript type must be save(opts?: { source?: string }): void
     const dir = makeTmpDir();
     const filePath = writeTmp(dir, []);
-    const loaded: LoadedScene = load(filePath);
+    const loaded: OpenScene = open(filePath);
 
     // These must all compile and work: no guard, empty opts, with source
     loaded.save();
@@ -156,7 +156,7 @@ describe("save({ source }) sets the source field in the written file (issue #7 A
   it("uses the provided source when given", () => {
     const dir = makeTmpDir();
     const filePath = writeTmp(dir, []);
-    const loaded = load(filePath);
+    const loaded = open(filePath);
 
     loaded.save({ source: "my-agent" });
 
@@ -167,7 +167,7 @@ describe("save({ source }) sets the source field in the written file (issue #7 A
   it("defaults source to 'duet' when omitted", () => {
     const dir = makeTmpDir();
     const filePath = writeTmp(dir, []);
-    const loaded = load(filePath);
+    const loaded = open(filePath);
 
     loaded.save();
 
@@ -193,7 +193,7 @@ describe("save({ source }) sets the source field in the written file (issue #7 A
       "utf8",
     );
 
-    const loaded = load(filePath);
+    const loaded = open(filePath);
     loaded.save(); // no source arg
 
     const onDisk = JSON.parse(fs.readFileSync(filePath, "utf8"));
