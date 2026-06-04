@@ -4,6 +4,7 @@ import "@excalidraw/excalidraw/index.css";
 import { shouldPersistEdit, sceneVersion, APP_STATE_WHITELIST } from "./writeback";
 import { flushPendingScene } from "./first-load";
 import { mergeRemoteScene } from "./client-merge";
+import { resolveCameraScroll, type CameraMessage } from "./camera";
 import type { El } from "./reconcile";
 
 type ExcalidrawAPI = {
@@ -14,6 +15,10 @@ type ExcalidrawAPI = {
   }) => void;
   getSceneElements: () => readonly unknown[];
   getSceneElementsIncludingDeleted: () => readonly unknown[];
+  scrollToContent: (
+    target: readonly unknown[],
+    opts: { fitToContent: true; animate: boolean; duration: number },
+  ) => void;
 };
 
 // appState keys we persist on the browser side too (shared with the server
@@ -130,6 +135,21 @@ export default function App() {
     hasLoadedRef.current = true;
   }
 
+  // Move the viewport in response to an agent `camera` message (#23). This is a
+  // VIEW path, deliberately separate from applyScene: it must NOT call
+  // updateScene (no flash, no version re-stamp), NOT touch isApplyingRemoteRef /
+  // lastVersionRef, and NOT emit a save. scrollToContent only mutates
+  // scroll*/zoom, which the save-gate (keyed on element sceneVersion) already
+  // swallows, so no save-suppression is needed here.
+  function applyCamera(msg: CameraMessage) {
+    const api = apiRef.current;
+    if (!api) return;
+    const elements = (api.getSceneElements() ?? []) as El[];
+    const args = resolveCameraScroll(msg, elements);
+    if (!args) return; // nothing to frame
+    api.scrollToContent(args.targets, args.options);
+  }
+
   function handleExcalidrawAPI(api: ExcalidrawAPI) {
     apiRef.current = api;
     // A scene may have arrived over the wire before the API existed; flush it.
@@ -199,6 +219,8 @@ export default function App() {
         const msg = JSON.parse(event.data as string);
         if (msg.type === "scene" && msg.scene != null) {
           applyScene(msg.scene);
+        } else if (msg.type === "camera") {
+          applyCamera(msg as CameraMessage);
         }
       } catch {
         // Ignore malformed messages
