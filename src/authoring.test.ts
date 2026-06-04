@@ -167,4 +167,38 @@ describe("bound-label width uses 0.55 estimate (issue #14)", () => {
     const derivedWidth = label.length * fontSize * 0.55;
     expect(textEl!.width).toBeCloseTo(derivedWidth, 0);
   });
+
+  test("connect() label x is centered on the arrow's true midpoint", () => {
+    // Two boxes side by side; connect draws a horizontal arrow from right edge
+    // of box1 to left edge of box2.
+    // box1: x=0, y=0, w=100, h=50  -> right edge center = (100, 25)
+    // box2: x=200, y=0, w=100, h=50 -> left edge center  = (200, 25)
+    // Arrow: startX=100, startY=25, endX=200, endY=25
+    // midX = (100 + 200) / 2 = 150
+    const s = scene();
+    const label = "calls";
+    s.labeledRect("box1", 0, 0, 100, 50, PALETTE.light.blue, "Box1", 14);
+    s.labeledRect("box2", 200, 0, 100, 50, PALETTE.light.blue, "Box2", 14);
+    s.connect("c1", "box1", "box2", { label });
+    const { elements } = s.build();
+
+    const arrowEl = elements.find((e) => e.id === "c1");
+    expect(arrowEl).toBeDefined();
+
+    // Compute midpoint from the arrow element's own geometry
+    const pts = arrowEl!.points as number[][];
+    const lastPt = pts[pts.length - 1];
+    const startAbsX = arrowEl!.x as number;
+    const startAbsY = arrowEl!.y as number;
+    const endAbsX = startAbsX + lastPt[0];
+    const endAbsY = startAbsY + lastPt[1];
+    const midX = (startAbsX + endAbsX) / 2;
+
+    const labelWidth = label.length * 14 * 0.55;
+    const expectedX = midX - labelWidth / 2;
+
+    const textEl = elements.find((e) => e.id === "c1_t");
+    expect(textEl).toBeDefined();
+    expect(textEl!.x).toBeCloseTo(expectedX, 5);
+  });
 });
