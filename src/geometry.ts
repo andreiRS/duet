@@ -37,7 +37,12 @@ const MIN_SPACING = 20; // px: elements closer than this (and not overlapping) a
 // is treated as off-canvas. Chosen so a moderately-displaced box (~400px+) is
 // caught while a normal spread-out layout (boxes a few hundred px apart) is not.
 const OFF_CANVAS_GAP = 350;
-const STRUCTURAL: ViolationType[] = ["box-overlap", "arrow-misses-target"];
+export const STRUCTURAL: ViolationType[] = ["box-overlap", "arrow-misses-target"];
+
+/** Returns true if this violation type is structural (cannot be auto-fixed). */
+export function isStructural(type: ViolationType): boolean {
+  return STRUCTURAL.includes(type);
+}
 
 interface Rect {
   x: number;

@@ -3,6 +3,15 @@ import type { El } from "./scene-types";
 import { readSceneFile, elementsOf } from "./scene-io";
 import { atomicWriteScene } from "./writeback";
 import { makeVerbs, type Verbs } from "./authoring";
+import { checkGeometry, isStructural, type Violation } from "./geometry";
+
+/** What save() returns: the mechanical violations that were auto-fixed. */
+export interface SaveReport {
+  /** true when the written scene has no remaining violations. */
+  ok: boolean;
+  /** The mechanical violations that were auto-fixed before writing. */
+  fixed: Violation[];
+}
 
 /**
  * A loaded-or-created scene handle: query (list/byId), authoring verbs that
@@ -16,10 +25,14 @@ export interface OpenScene extends Verbs {
   byId(id: string): El | undefined;
   /**
    * Atomically write the current state back to the file.
-   * No EchoGuard: the agent's own write must reach the watcher and broadcast.
+   * By default runs the geometry check before writing:
+   *   - Auto-fixes mechanical violations (spacing-too-close, off-canvas, label-wider-than-box).
+   *   - Throws on structural violations (box-overlap, arrow-misses-target) — nothing is written.
+   * Pass `check: false` to skip the check entirely (writes as-is).
    * @param opts.source  Defaults to "duet".
+   * @param opts.check   Defaults to true.
    */
-  save(opts?: { source?: string }): void;
+  save(opts?: { source?: string; check?: boolean }): SaveReport;
 }
 
 /**
@@ -48,8 +61,33 @@ export function open(filePath: string): OpenScene {
       return elements.find((e) => e.id === id);
     },
 
-    save(opts?: { source?: string }): void {
-      atomicWriteScene(filePath, { elements, appState }, opts?.source ?? "duet");
+    save(opts?: { source?: string; check?: boolean }): SaveReport {
+      const check = opts?.check !== false; // defaults to true
+      if (!check) {
+        atomicWriteScene(filePath, { elements, appState }, opts?.source ?? "duet");
+        return { ok: true, fixed: [] };
+      }
+
+      const result = checkGeometry(elements);
+
+      // Structural violations: throw before writing anything
+      const structural = result.remaining.filter((v) => isStructural(v.type));
+      if (structural.length > 0) {
+        const desc = structural.map((v) => `${v.type}(${v.ids.join(",")})`).join("; ");
+        throw new Error(`save() aborted: structural geometry violations detected — ${desc}`);
+      }
+
+      // Mechanical auto-fixes: the violations that are in `violations` but not in `remaining`
+      const remainingTypes = new Set(result.remaining.map((v) => `${v.type}:${v.ids.join(",")}`));
+      const autoFixed = result.violations.filter(
+        (v) => !remainingTypes.has(`${v.type}:${v.ids.join(",")}`)
+      );
+
+      // Write the auto-corrected elements. Keep the live array in sync.
+      atomicWriteScene(filePath, { elements: result.fixed, appState }, opts?.source ?? "duet");
+      elements.splice(0, elements.length, ...result.fixed);
+
+      return { ok: true, fixed: autoFixed };
     },
   };
 }
