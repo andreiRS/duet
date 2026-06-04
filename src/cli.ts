@@ -23,26 +23,28 @@ export async function runCameraCommand(
   env: Record<string, string | undefined>,
 ): Promise<CameraResult> {
   // Parse flags
-  let portArg: number | undefined;
+  let portArg: string | undefined;
   let animate = true;
   const ids: string[] = [];
-  let hasTo = false;
 
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     if (arg === "--port") {
-      portArg = parseInt(argv[++i] ?? "", 10);
+      portArg = argv[++i];
     } else if (arg === "--no-animate") {
       animate = false;
     } else if (arg === "--to") {
       const raw = argv[++i] ?? "";
       ids.push(...raw.split(",").filter(Boolean));
-      hasTo = true;
     }
   }
 
   // Port precedence: --port flag > DUET_PORT env > 3737 default
-  const port = portArg ?? (env["DUET_PORT"] ? parseInt(env["DUET_PORT"]!, 10) : 3737);
+  const portRaw = portArg ?? env["DUET_PORT"] ?? "3737";
+  const port = Number(portRaw);
+  if (!Number.isInteger(port) || port <= 0) {
+    return { code: 1, stderr: "duet: --port requires a number" };
+  }
 
   // Build request body
   const body: Record<string, unknown> = {
@@ -50,26 +52,27 @@ export async function runCameraCommand(
     animate,
     duration: CAMERA_FIT_DURATION_MS,
   };
-  if (hasTo) {
+  if (ids.length > 0) {
     body.to = ids;
   }
 
-  // POST to server
+  // POST to server. A connection failure or an unreadable (non-JSON) body are
+  // both treated as "server unreachable" (code 2) — we never got a usable reply.
   let resp: Response;
+  let json: unknown;
   try {
     resp = await fetch(`http://localhost:${port}/camera`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
     });
+    json = await resp.json();
   } catch {
     return {
       code: 2,
       stderr: `duet: no server on localhost:${port} — start one with \`duet <file>\``,
     };
   }
-
-  const json = await resp.json();
 
   if (!resp.ok) {
     return { code: 1, stdout: JSON.stringify(json) };
