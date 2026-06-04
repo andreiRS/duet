@@ -222,6 +222,26 @@ describe("save() reconciles on write — forward race (issue #16)", () => {
     expect(ids).toContain("H2"); // concurrent human edit to a different id survives
   });
 
+  it("AC: save() throws (not blind-overwrites) when the on-disk file is unreadable at save time", () => {
+    const dir = makeTmpDir();
+    const filePath = writeTmp(dir, [
+      { id: "H1", type: "rectangle", x: 0, y: 0, width: 100, height: 50, version: 1, versionNonce: 10 },
+    ]);
+
+    const h = open(filePath); // valid load, baseline [H1]
+    h.labeledRect("agentBox", 600, 0, 120, 60, ["", "#fff", "#000"] as const, "AGENT", 16);
+
+    // file gets corrupted in the open()→save() window (e.g. a partial write)
+    const corrupt = "{ truncated mid-write";
+    fs.writeFileSync(filePath, corrupt);
+
+    // save() must fail loudly rather than silently dropping the on-disk state.
+    expect(() => h.save({ check: false })).toThrow(/unreadable|on-disk/i);
+    expect(() => h.save({ check: false })).toThrow(filePath);
+    // and it must NOT have clobbered the (corrupt) bytes on disk.
+    expect(fs.readFileSync(filePath, "utf8")).toBe(corrupt);
+  });
+
   it("AC: first save (no file on disk yet) writes the agent's elements", () => {
     const dir = makeTmpDir();
     const filePath = path.join(dir, "fresh.excalidraw");

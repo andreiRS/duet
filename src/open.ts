@@ -57,10 +57,15 @@ function reconcileForWrite(filePath: string, baseline: El[], agent: El[]): El[] 
   let disk: El[];
   try {
     disk = elementsOf(readSceneFile(filePath));
-  } catch {
-    // On-disk file unreadable mid-write — fall back to writing the agent's
-    // elements rather than crashing the save.
-    return agent;
+  } catch (cause) {
+    // On-disk file unreadable mid-save. We must NOT fall back to writing the
+    // agent's elements — that would blind-overwrite concurrent on-disk state,
+    // the exact race ADR-0007 closes. Fail loudly instead (mirrors open()'s
+    // fail-fast on a malformed read) so nothing is written.
+    throw new Error(
+      `save(${filePath}): on-disk scene was unreadable at save time — refusing to overwrite to avoid clobbering concurrent edits: ${(cause as Error).message}`,
+      { cause }
+    );
   }
 
   const diff = diffById(baseline, agent);
@@ -81,6 +86,11 @@ function reconcileForWrite(filePath: string, baseline: El[], agent: El[]): El[] 
 
   // Honor agent deletions: an id the agent removed from its array must not be
   // re-added by mergeById's "keep on-disk" rule.
+  //
+  // NOTE: this is the one path that deliberately ignores the disk `version` for
+  // an id (every other path respects it). Per ADR-0007's accepted same-id LWW,
+  // an agent array-delete means "agent intentionally removed → stays gone",
+  // regardless of what version the disk copy carries.
   const deleted = new Set(diff.deleted);
   const diskKept = disk.filter((e) => !deleted.has(e.id));
 
