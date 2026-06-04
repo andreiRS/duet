@@ -565,3 +565,89 @@ describe("browser → file write-back (save message)", () => {
     expect(await secondBounce).toBe("quiet");
   });
 });
+
+// ─── Slice 21: poll currentScene to absorb write-then-frame race ─────────────
+
+describe("POST /camera — fit --to id absent now but appears within polling window", () => {
+  it("resolves 200 and publishes when id arrives in currentScene before ceiling", async () => {
+    const dir = setup();
+    const { server, setScene } = createServer({ port: 0, distDir: dir });
+    addCleanup(() => server.stop(true));
+
+    // Scene starts with no elements — the id "new1" is absent at call time
+    setScene({ elements: [], appState: {} });
+
+    const ws = new WebSocket(`ws://localhost:${server.port}/`);
+    addCleanup(() => ws.close());
+    await wsOpen(ws);
+    await nextMessage(ws); // consume replay
+
+    // Fire the POST first, then simulate watcher catching up after 120ms
+    const pending = postCamera(server.port, { op: "fit", to: ["new1"] });
+    setTimeout(() => setScene({ elements: [{ id: "new1" }], appState: {} }), 120);
+
+    const collected = collectCameraMessages(ws, pending);
+    const res = await pending;
+    const body = await res.json() as { framed: number };
+
+    expect(res.status).toBe(200);
+    expect(body.framed).toBeGreaterThanOrEqual(1);
+
+    const msgs = await collected as { type: string; op: string; ids: string[] }[];
+    expect(msgs).toHaveLength(1);
+    expect(msgs[0].type).toBe("camera");
+    expect(msgs[0].ids).toEqual(["new1"]);
+  });
+});
+
+describe("POST /camera — fit --to bogus id never arrives → 4xx after ceiling", () => {
+  it("returns 4xx {missing:[bogus]} after polling window elapses", async () => {
+    const dir = setup();
+    const { server, setScene } = createServer({ port: 0, distDir: dir });
+    addCleanup(() => server.stop(true));
+
+    setScene({ elements: [{ id: "existing" }], appState: {} });
+
+    const ws = new WebSocket(`ws://localhost:${server.port}/`);
+    addCleanup(() => ws.close());
+    await wsOpen(ws);
+    await nextMessage(ws); // consume replay
+
+    const pending = postCamera(server.port, { op: "fit", to: ["bogus"] });
+    const collected = collectCameraMessages(ws, pending);
+    const res = await pending;
+    const body = await res.json() as { missing: string[] };
+
+    expect(res.status).toBeGreaterThanOrEqual(400);
+    expect(body.missing).toEqual(["bogus"]);
+    expect(await collected).toHaveLength(0);
+  }, 2000); // allow up to 2s; ceiling is 400ms
+});
+
+describe("POST /camera — plain fit on empty scene, element appears within polling window", () => {
+  it("resolves 200 and publishes when an element appears in currentScene before ceiling", async () => {
+    const dir = setup();
+    const { server, setScene } = createServer({ port: 0, distDir: dir });
+    addCleanup(() => server.stop(true));
+
+    // Scene starts empty
+    setScene({ elements: [], appState: {} });
+
+    const ws = new WebSocket(`ws://localhost:${server.port}/`);
+    addCleanup(() => ws.close());
+    await wsOpen(ws);
+    await nextMessage(ws); // consume replay
+
+    // Fire POST then simulate watcher writing the first element after 120ms
+    const pending = postCamera(server.port, { op: "fit" });
+    setTimeout(() => setScene({ elements: [{ id: "first" }], appState: {} }), 120);
+
+    const collected = collectCameraMessages(ws, pending);
+    const res = await pending;
+    const body = await res.json() as { framed: number };
+
+    expect(res.status).toBe(200);
+    expect(body.framed).toBeGreaterThanOrEqual(1);
+    expect(await collected).toHaveLength(1);
+  });
+});
