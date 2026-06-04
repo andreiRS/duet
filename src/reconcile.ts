@@ -99,6 +99,12 @@ export function mergeById(
 // Excalidraw's reconciliation rule: higher `version` wins; on a tie the element
 // with the LOWER `versionNonce` wins. A missing field is treated as 0 (lowest),
 // conservatively. `a` is the on-disk copy, `b` the incoming copy.
+//
+// When version AND versionNonce are both equal we still need a deterministic,
+// argument-order-independent winner so all writers converge regardless of which
+// side a copy arrives on (the agent path and #17 call mergeById with swapped
+// args). We break that final tie on a stable, symmetric key — the canonical
+// JSON of each copy — so pickWinner(a,b) and pickWinner(b,a) pick the same one.
 function pickWinner(a: El, b: El): El {
   const va = (a.version as number) ?? 0;
   const vb = (b.version as number) ?? 0;
@@ -106,7 +112,10 @@ function pickWinner(a: El, b: El): El {
   if (va > vb) return a;
   const na = (a.versionNonce as number) ?? 0;
   const nb = (b.versionNonce as number) ?? 0;
-  return nb < na ? b : a;
+  if (nb < na) return b;
+  if (na < nb) return a;
+  // version and versionNonce both equal — deterministic symmetric tiebreak.
+  return JSON.stringify(b) < JSON.stringify(a) ? b : a;
 }
 
 // Geometry = every whitelisted field except text. Driven by PATCH_FIELDS so the
