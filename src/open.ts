@@ -64,6 +64,7 @@ export function open(filePath: string): OpenScene {
     save(opts?: { source?: string; check?: boolean }): SaveReport {
       const check = opts?.check !== false; // defaults to true
       if (!check) {
+        // Caller opted out of checking — ok:true is a no-check contract, not a geometry guarantee.
         atomicWriteScene(filePath, { elements, appState }, opts?.source ?? "duet");
         return { ok: true, fixed: [] };
       }
@@ -77,17 +78,23 @@ export function open(filePath: string): OpenScene {
         throw new Error(`save() aborted: structural geometry violations detected — ${desc}`);
       }
 
-      // Mechanical auto-fixes: the violations that are in `violations` but not in `remaining`
-      const remainingTypes = new Set(result.remaining.map((v) => `${v.type}:${v.ids.join(",")}`));
+      // Mechanical auto-fixes: the violations that are in `violations` but not in `remaining`.
+      // Sort ids before joining so the key is order-independent (defensive against
+      // non-deterministic id ordering in future detectors).
+      const remainingKeys = new Set(
+        result.remaining.map((v) => `${v.type}:${[...v.ids].sort().join(",")}`)
+      );
       const autoFixed = result.violations.filter(
-        (v) => !remainingTypes.has(`${v.type}:${v.ids.join(",")}`)
+        (v) => !remainingKeys.has(`${v.type}:${[...v.ids].sort().join(",")}`)
       );
 
       // Write the auto-corrected elements. Keep the live array in sync.
       atomicWriteScene(filePath, { elements: result.fixed, appState }, opts?.source ?? "duet");
       elements.splice(0, elements.length, ...result.fixed);
 
-      return { ok: true, fixed: autoFixed };
+      // Reflect the geometry check's own ok: false when a mechanical violation
+      // survived the auto-fix loop (e.g. hit the 50-pass cap).
+      return { ok: result.ok, fixed: autoFixed };
     },
   };
 }
