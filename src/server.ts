@@ -3,6 +3,16 @@ import * as fs from "fs";
 import { EchoGuard, writeSceneFile } from "./writeback";
 import { readSceneFile, elementsOf } from "./scene-io";
 import { mergeById, type El } from "./reconcile";
+import { normalizeBoundTextHeights } from "./bound-text";
+
+// Correct any clipped multiline bound-text geometry (#25) before a scene reaches
+// the browser. Pure: returns a new scene object, leaves the input untouched. A
+// scene without an elements array passes through unchanged.
+function normalizeScene(scene: Scene): Scene {
+  if (!scene || !Array.isArray((scene as { elements?: unknown }).elements)) return scene;
+  const elements = normalizeBoundTextHeights((scene as { elements: El[] }).elements);
+  return { ...scene, elements };
+}
 
 export type Scene = Record<string, unknown> | null;
 
@@ -241,8 +251,8 @@ export function createServer({
   });
 
   function setScene(scene: Scene): void {
-    currentScene = scene;
-    server.publish("scene", sceneMsg(scene));
+    currentScene = normalizeScene(scene);
+    server.publish("scene", sceneMsg(currentScene));
   }
 
   function getScene(): Scene {
