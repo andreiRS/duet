@@ -250,6 +250,21 @@ describe("open() on a malformed .excalidraw file (issue #11)", () => {
     expect(fs.readdirSync(dir)).toEqual(["corrupt.excalidraw"]);
   });
 
+  it("AC4: throws the same malformed error when JSON is valid but NOT a scene shape (no elements array)", () => {
+    const dir = makeTmpDir();
+    // valid JSON but wrong shape — each must throw, not silently start empty
+    const cases = ["null", "123", '"foo"', "[1,2,3]", '{"foo":1}'];
+    for (const content of cases) {
+      const filePath = path.join(dir, "wrong-shape.excalidraw");
+      fs.writeFileSync(filePath, content);
+
+      expect(() => open(filePath)).toThrow(/malformed|invalid/i);
+      expect(() => open(filePath)).toThrow(filePath);
+      // and it must not overwrite the existing (wrong-shape) bytes
+      expect(fs.readFileSync(filePath, "utf8")).toBe(content);
+    }
+  });
+
   it("AC3: a valid file is unaffected — loads, verbs work, save works", () => {
     const dir = makeTmpDir();
     const filePath = writeTmp(dir, [{ id: "existing", type: "rectangle", x: 0, y: 0 }]);
