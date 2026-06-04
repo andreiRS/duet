@@ -46,6 +46,16 @@ interface Rect {
   h: number;
 }
 
+// ---- label-width estimation ----
+// Shared heuristic used at CHECK TIME for bound-text overflow detection.
+// The 0.55 factor matches what authoring.ts uses for standalone text, and is
+// good enough as a validation proxy. Stored bound-text widths are always 0
+// (Excalidraw re-measures them on load), so we CANNOT trust label.width here.
+const CHAR_WIDTH_FACTOR = 0.55;
+function estimateLabelWidth(text: string, fontSize: number): number {
+  return text.length * fontSize * CHAR_WIDTH_FACTOR;
+}
+
 // ---- geometry parsing (reused from local-renderer prior art) ----
 
 function elements(input: { elements?: El[] } | El[]): El[] {
@@ -100,11 +110,16 @@ function detect(els: El[]): Violation[] {
   const out: Violation[] = [];
   const boxes = els.filter(isBox);
 
-  // 1. Label wider than box: a bound text whose width exceeds its container box.
+  // 1. Label wider than box: a bound text whose estimated width exceeds its
+  //    container box. We measure at check time rather than trusting the stored
+  //    width (which is 0 for bound labels, since Excalidraw re-measures on load).
   for (const box of boxes) {
     const label = els.find((e) => e.type === "text" && e.containerId === box.id);
-    if (label && (label.width ?? 0) > (box.width ?? 0)) {
-      out.push({ type: "label-wider-than-box", ids: [box.id] });
+    if (label) {
+      const checkWidth = estimateLabelWidth(label.text ?? "", label.fontSize ?? 14);
+      if (checkWidth > (box.width ?? 0)) {
+        out.push({ type: "label-wider-than-box", ids: [box.id] });
+      }
     }
   }
 
@@ -245,16 +260,18 @@ function applyFix(els: El[], v: Violation): boolean {
   const byId = (id: string) => els.find((e) => e.id === id);
   switch (v.type) {
     case "label-wider-than-box": {
-      // widen the box (and re-center its label) to fit the label
+      // widen the box to fit the label, measuring width at fix time (same
+      // heuristic as detection; stored label.width is 0 for bound labels)
       const box = byId(v.ids[0]);
       if (!box) return false;
       const label = els.find((e) => e.type === "text" && e.containerId === box.id);
       if (!label) return false;
       const pad = 10;
-      const newW = (label.width ?? 0) + pad * 2;
+      const labelW = estimateLabelWidth(label.text ?? "", label.fontSize ?? 14);
+      const newW = labelW + pad * 2;
       box.x = box.x - (newW - (box.width ?? 0)) / 2; // grow around the center
       box.width = newW;
-      label.x = box.x + (box.width - (label.width ?? 0)) / 2;
+      label.x = box.x + (box.width - labelW) / 2;
       return true;
     }
     case "off-canvas": {

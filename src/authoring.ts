@@ -108,7 +108,9 @@ export function makeVerbs(els: El[], opts: { dark?: boolean } = {}): Verbs {
     };
   };
 
-  // Crude width estimate; Excalidraw re-measures on load
+  // Crude width estimate for STANDALONE text only.
+  // Bound labels (labeledRect, arrow label) store width=0 and let Excalidraw
+  // re-measure on load. geometry.ts uses the same 0.55 factor at check time.
   const w = (t: string, fs: number) => t.length * fs * 0.55;
 
   // Standalone text element
@@ -144,13 +146,14 @@ export function makeVerbs(els: El[], opts: { dark?: boolean } = {}): Verbs {
         boundElements: [{ type: "text", id: tid }],
       }),
     );
-    const tw = w(label, fontSize);
+    // Bound text: let Excalidraw measure and re-center on load.
+    // We store width=0 so no hand-computed 0.55 estimate pollutes the JSON.
     els.push(
       baseText({
         id: tid,
-        x: x + (width - tw) / 2,
+        x: x + width / 2,
         y: y + (height - fontSize * 1.25) / 2,
-        width: tw,
+        width: 0,
         height: fontSize * 1.25,
         text: label,
         fontSize,
@@ -176,12 +179,13 @@ export function makeVerbs(els: El[], opts: { dark?: boolean } = {}): Verbs {
     const tid = arrowEl.id + "_t";
     arrowEl.boundElements = [{ type: "text", id: tid }];
     els.push(arrowEl);
+    // Bound text: width=0 so Excalidraw measures and re-centers on load.
     els.push(
       baseText({
         id: tid,
-        x: x1 + (x2 - x1) / 2 - w(label, 14) / 2,
+        x: x1 + (x2 - x1) / 2,
         y: y1 + (y2 - y1) / 2 - 10,
-        width: w(label, 14),
+        width: 0,
         height: 20,
         text: label,
         fontSize: 14,

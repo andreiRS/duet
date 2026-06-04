@@ -100,3 +100,45 @@ describe("build() returns valid Excalidraw JSON", () => {
     }
   });
 });
+
+// Issue #9: bound labels must not carry a hand-computed 0.55-derived width
+describe("bound-label width is NOT the 0.55 heuristic", () => {
+  test("labeledRect bound text width is 0 (not length*fontSize*0.55)", () => {
+    const s = scene();
+    const label = "Hello World";
+    const fontSize = 16;
+    s.labeledRect("box1", 0, 0, 200, 80, PALETTE.light.blue, label, fontSize);
+    const { elements } = s.build();
+    const textEl = elements.find((e) => e.id === "box1_t");
+    expect(textEl).toBeDefined();
+    // 0.55-derived width: 11 * 16 * 0.55 = 96.8
+    const derivedWidth = label.length * fontSize * 0.55;
+    expect(textEl!.width).not.toBeCloseTo(derivedWidth, 0);
+    expect(textEl!.width).toBe(0);
+  });
+
+  test("arrow label bound text width is 0 (not length*fontSize*0.55)", () => {
+    const s = scene();
+    const label = "calls";
+    s.arrow("a1", 0, 0, [[0, 0], [100, 0]], "#000000", label);
+    const { elements } = s.build();
+    const textEl = elements.find((e) => e.id === "a1_t");
+    expect(textEl).toBeDefined();
+    // 0.55-derived width: 5 * 14 * 0.55 = 38.5
+    const derivedWidth = label.length * 14 * 0.55;
+    expect(textEl!.width).not.toBeCloseTo(derivedWidth, 0);
+    expect(textEl!.width).toBe(0);
+  });
+
+  test("standalone text() KEEPS its 0.55-derived width (unchanged)", () => {
+    const s = scene();
+    const label = "standalone text";
+    const fontSize = 14;
+    s.text("t1", 0, 0, label, fontSize);
+    const { elements } = s.build();
+    const textEl = elements.find((e) => e.id === "t1");
+    expect(textEl).toBeDefined();
+    const derivedWidth = label.length * fontSize * 0.55;
+    expect(textEl!.width).toBeCloseTo(derivedWidth, 0);
+  });
+});
