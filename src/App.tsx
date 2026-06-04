@@ -13,6 +13,7 @@ type ExcalidrawAPI = {
     captureUpdate?: (typeof CaptureUpdateAction)[keyof typeof CaptureUpdateAction];
   }) => void;
   getSceneElements: () => readonly unknown[];
+  getSceneElementsIncludingDeleted: () => readonly unknown[];
 };
 
 // appState keys we persist on the browser side too (shared with the server
@@ -73,7 +74,12 @@ export default function App() {
     // human element drawn but not yet debounce-saved (a fresh local-only id) is
     // not dropped from view until its pending save round-trips. On first load the
     // canvas is empty, so this is exactly the remote scene (no flash).
-    const localElements = (api.getSceneElements() ?? []) as El[];
+    // Use getSceneElementsIncludingDeleted (not getSceneElements, which strips
+    // isDeleted:true tombstones) so a just-deleted element participates in the
+    // merge: a human delete is a tombstone with a HIGHER version, so if a stale
+    // remote scene still holds that element ALIVE (lower version), the version
+    // tiebreak keeps the tombstone and the element is not resurrected on canvas.
+    const localElements = (api.getSceneElementsIncludingDeleted() ?? []) as El[];
     const elements = mergeRemoteScene(remoteElements as El[], localElements);
     // Mark that we are applying a remote scene so the onChange(s) updateScene
     // fires are absorbed, not bounced back as a "save". updateScene re-stamps
