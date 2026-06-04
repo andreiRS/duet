@@ -38,10 +38,10 @@ export function resolveCameraScroll(
 ): CameraScrollArgs | null {
   // op:"fit" with no ids frames the whole scene; with ids, the union of the
   // elements whose id is listed (preserving scene order).
-  const targets =
-    msg.ids === undefined
-      ? elements
-      : elements.filter((e) => msg.ids!.includes(e.id as string));
+  const idSet = msg.ids ? new Set(msg.ids) : null;
+  const targets = idSet
+    ? elements.filter((e) => idSet.has(e.id as string))
+    : elements;
 
   // Nothing to frame — empty scene, or ids matched no element. Frame nothing
   // rather than snapping to the whole scene.
