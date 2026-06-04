@@ -2,7 +2,7 @@ import { describe, it, expect, afterEach } from "bun:test";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
-import { writeSceneFile, EchoGuard } from "./writeback";
+import { writeSceneFile, atomicWriteScene, EchoGuard } from "./writeback";
 import { open } from "./open";
 import { scene, PALETTE } from "./authoring";
 
@@ -122,6 +122,116 @@ describe("open() keeps load() query + save() (AC: load tests still pass)", () =>
     h.save({ source: "my-agent" });
     const onDisk = JSON.parse(fs.readFileSync(filePath, "utf8"));
     expect(onDisk.source).toBe("my-agent");
+  });
+});
+
+// ─── Issue #16: save() reconciles on write (forward race) ────────────────────
+
+describe("save() reconciles on write — forward race (issue #16)", () => {
+  it("AC: a human element written between open() and save() survives the agent save", () => {
+    const dir = makeTmpDir();
+    // file starts with one human element H1
+    const filePath = writeTmp(dir, [
+      { id: "H1", type: "rectangle", x: 0, y: 0, width: 100, height: 50, version: 1, versionNonce: 10 },
+    ]);
+
+    // agent opens, snapshotting [H1]
+    const h = open(filePath);
+
+    // a human draws H2 in the window — written to disk via the atomic writer
+    atomicWriteScene(filePath, {
+      elements: [
+        { id: "H1", type: "rectangle", x: 0, y: 0, width: 100, height: 50, version: 1, versionNonce: 10 },
+        { id: "H2", type: "ellipse", x: 300, y: 300, width: 40, height: 40, version: 1, versionNonce: 20 },
+      ],
+    });
+
+    // agent adds its own box, then saves
+    h.labeledRect("agentBox", 600, 0, 120, 60, ["", "#fff", "#000"] as const, "AGENT", 16);
+    h.save();
+
+    const onDisk = JSON.parse(fs.readFileSync(filePath, "utf8"));
+    const ids = onDisk.elements.map((e: { id: string }) => e.id);
+    expect(ids).toContain("H1");
+    expect(ids).toContain("H2"); // concurrent human element survived
+    expect(ids).toContain("agentBox"); // agent's own element written
+  });
+
+  it("AC: the agent's own modified element is still written", () => {
+    const dir = makeTmpDir();
+    const filePath = writeTmp(dir, [
+      { id: "api", type: "rectangle", x: 0, y: 0, width: 100, height: 50, version: 1, versionNonce: 10 },
+    ]);
+
+    const h = open(filePath);
+    h.byId("api")!.x = 250; // agent moves api
+    h.save({ check: false });
+
+    const onDisk = JSON.parse(fs.readFileSync(filePath, "utf8"));
+    const api = onDisk.elements.find((e: { id: string }) => e.id === "api");
+    expect(api.x).toBe(250);
+  });
+
+  it("AC: the agent's edit wins over the stale on-disk copy via the version stamp", () => {
+    const dir = makeTmpDir();
+    const filePath = writeTmp(dir, [
+      { id: "api", type: "rectangle", x: 0, y: 0, width: 100, height: 50, version: 3, versionNonce: 10 },
+    ]);
+
+    const h = open(filePath); // baseline api.version = 3
+    h.byId("api")!.x = 250; // agent moves api
+    h.save({ check: false });
+
+    const onDisk = JSON.parse(fs.readFileSync(filePath, "utf8"));
+    const api = onDisk.elements.find((e: { id: string }) => e.id === "api");
+    // agent stamped version > loaded 3, so its edit (x:250) wins on merge
+    expect(api.x).toBe(250);
+    expect(api.version).toBeGreaterThan(3);
+  });
+
+  it("AC: an element the agent intentionally removed is not resurrected from disk", () => {
+    const dir = makeTmpDir();
+    // file has H1 (human) and db (agent-authored earlier)
+    const filePath = writeTmp(dir, [
+      { id: "H1", type: "rectangle", x: 0, y: 0, width: 100, height: 50, version: 1, versionNonce: 10 },
+      { id: "db", type: "rectangle", x: 200, y: 0, width: 100, height: 50, version: 1, versionNonce: 11 },
+    ]);
+
+    const h = open(filePath); // baseline [H1, db]
+
+    // agent intentionally removes db from its array
+    const live = h.list();
+    const idx = live.findIndex((e) => e.id === "db");
+    live.splice(idx, 1);
+
+    // a concurrent human writes a DIFFERENT new element H2
+    atomicWriteScene(filePath, {
+      elements: [
+        { id: "H1", type: "rectangle", x: 0, y: 0, width: 100, height: 50, version: 1, versionNonce: 10 },
+        { id: "db", type: "rectangle", x: 200, y: 0, width: 100, height: 50, version: 1, versionNonce: 11 },
+        { id: "H2", type: "ellipse", x: 500, y: 0, width: 40, height: 40, version: 1, versionNonce: 12 },
+      ],
+    });
+
+    h.save({ check: false });
+
+    const onDisk = JSON.parse(fs.readFileSync(filePath, "utf8"));
+    const ids = onDisk.elements.map((e: { id: string }) => e.id);
+    expect(ids).not.toContain("db"); // agent-deleted id stays gone
+    expect(ids).toContain("H1");
+    expect(ids).toContain("H2"); // concurrent human edit to a different id survives
+  });
+
+  it("AC: first save (no file on disk yet) writes the agent's elements", () => {
+    const dir = makeTmpDir();
+    const filePath = path.join(dir, "fresh.excalidraw");
+
+    const h = open(filePath); // missing file, starts empty
+    h.labeledRect("api", 0, 0, 120, 60, ["", "#fff", "#000"] as const, "API", 16);
+    h.save();
+
+    const onDisk = JSON.parse(fs.readFileSync(filePath, "utf8"));
+    expect(onDisk.elements.map((e: { id: string }) => e.id)).toEqual(["api", "api_t"]);
   });
 });
 

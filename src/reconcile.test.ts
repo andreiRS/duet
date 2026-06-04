@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { applyPatch, diffById, isHumanId } from "./reconcile";
+import { diffById } from "./reconcile";
 import { scene } from "./authoring";
 
 // AC1: a box whose geometry (x/y/width/height) changed between baseline and
@@ -88,119 +88,6 @@ test("AC2: bumping only version/versionNonce produces no change", () => {
   expect(diff.retyped).toHaveLength(0);
   expect(diff.added).toHaveLength(0);
   expect(diff.deleted).toHaveLength(0);
-});
-
-// AC3: an element with an unknown (Excalidraw random nanoid) id, present only
-// in current, is classified added and recognised as human-drawn.
-test("AC3: an unknown random-nanoid id is classified added and recognised as human", () => {
-  const baseline = [{ id: "api", type: "rectangle", x: 0, y: 0, width: 100, height: 50 }];
-  const humanId = "Qx7mK2pLvR9nT4sW8bZc1"; // 21-char Excalidraw-style nanoid
-  const current = [
-    { id: "api", type: "rectangle", x: 0, y: 0, width: 100, height: 50 },
-    { id: humanId, type: "ellipse", x: 300, y: 300, width: 40, height: 40 },
-  ];
-
-  const diff = diffById(baseline, current);
-
-  expect(diff.added).toContain(humanId);
-  expect(isHumanId(humanId)).toBe(true);
-});
-
-// AC3 guard: the heuristic must NOT misclassify normal authored ids as human.
-test("AC3: authored ids (short, a1, api, api_t) are not treated as human", () => {
-  expect(isHumanId("api")).toBe(false);
-  expect(isHumanId("api_t")).toBe(false);
-  expect(isHumanId("a1")).toBe(false);
-  expect(isHumanId("db")).toBe(false);
-  expect(isHumanId("darkbg")).toBe(false);
-});
-
-// AC4: applying the patch keeps a human's MOVED element at the human's value.
-// The agent re-authors `api` at the stale baseline position; the human had
-// dragged it. After reconciliation `api` sits where the human left it.
-test("AC4: applying the patch keeps a human's moved element at the human's value", () => {
-  const baseline = [{ id: "api", type: "rectangle", x: 0, y: 0, width: 100, height: 50 }];
-  // human dragged api to x:300
-  const human = [{ id: "api", type: "rectangle", x: 300, y: 0, width: 100, height: 50 }];
-  // agent's fresh edit re-authored api back at the stale baseline x:0
-  const agent = [{ id: "api", type: "rectangle", x: 0, y: 0, width: 100, height: 50 }];
-
-  const reconciled = applyPatch(agent, diffById(baseline, human), human);
-  const api = reconciled.find((e) => e.id === "api")!;
-
-  expect(api.x).toBe(300);
-});
-
-// AC4: applying the patch keeps a human's RENAMED (retyped) element text.
-test("AC4: applying the patch keeps a human's renamed text", () => {
-  const baseline = [{ id: "api_t", type: "text", x: 0, y: 0, width: 30, height: 20, text: "API" }];
-  const human = [{ id: "api_t", type: "text", x: 0, y: 0, width: 30, height: 20, text: "Gateway" }];
-  const agent = [{ id: "api_t", type: "text", x: 0, y: 0, width: 30, height: 20, text: "API" }];
-
-  const reconciled = applyPatch(agent, diffById(baseline, human), human);
-  const t = reconciled.find((e) => e.id === "api_t")!;
-
-  expect(t.text).toBe("Gateway");
-});
-
-// AC4 / AC3: a human-drawn element (unknown id) survives reconciliation unchanged.
-test("AC4: a human-drawn element is preserved unchanged after the patch", () => {
-  const baseline = [{ id: "api", type: "rectangle", x: 0, y: 0, width: 100, height: 50 }];
-  const humanId = "Qx7mK2pLvR9nT4sW8bZc1";
-  const human = [
-    { id: "api", type: "rectangle", x: 0, y: 0, width: 100, height: 50 },
-    { id: humanId, type: "ellipse", x: 300, y: 300, width: 40, height: 40 },
-  ];
-  const agent = [{ id: "api", type: "rectangle", x: 0, y: 0, width: 100, height: 50 }];
-
-  const reconciled = applyPatch(agent, diffById(baseline, human), human);
-  const drawn = reconciled.find((e) => e.id === humanId);
-
-  expect(drawn).toBeDefined();
-  expect(drawn!.x).toBe(300);
-  expect(drawn!.y).toBe(300);
-});
-
-// MUST-FIX: a human-deleted element must NOT be resurrected by the patch.
-// The agent re-authors `db` from a stale baseline, but the human deleted it.
-// Human deletion is a human edit; it must survive the next agent edit.
-test("applyPatch does not resurrect a human-deleted element", () => {
-  const baseline = [
-    { id: "api", type: "rectangle", x: 0, y: 0, width: 100, height: 50 },
-    { id: "db", type: "rectangle", x: 200, y: 0, width: 100, height: 50 },
-  ];
-  // human deleted db
-  const human = [{ id: "api", type: "rectangle", x: 0, y: 0, width: 100, height: 50 }];
-  // agent re-authored db from the stale baseline
-  const agent = [
-    { id: "api", type: "rectangle", x: 0, y: 0, width: 100, height: 50 },
-    { id: "db", type: "rectangle", x: 200, y: 0, width: 100, height: 50 },
-  ];
-
-  const reconciled = applyPatch(agent, diffById(baseline, human), human);
-
-  expect(reconciled.find((e) => e.id === "db")).toBeUndefined();
-  expect(reconciled.find((e) => e.id === "api")).toBeDefined();
-});
-
-// An agent-added element with a KNOWN (short, agent-scheme) id is owned by the
-// agent: the patch base is the agent's scene, so the agent's value stands. A
-// human-drawn (unknown id) added element is carried over from the human scene.
-test("applyPatch: agent owns its short-id added elements; human-drawn ones are carried over", () => {
-  const baseline = [{ id: "api", type: "rectangle", x: 0, y: 0, width: 100, height: 50 }];
-  const human = [{ id: "api", type: "rectangle", x: 0, y: 0, width: 100, height: 50 }];
-  // agent added a short-id `db` that the human never saw
-  const agent = [
-    { id: "api", type: "rectangle", x: 0, y: 0, width: 100, height: 50 },
-    { id: "db", type: "rectangle", x: 999, y: 0, width: 100, height: 50 },
-  ];
-
-  const reconciled = applyPatch(agent, diffById(baseline, human), human);
-  const db = reconciled.find((e) => e.id === "db");
-
-  // agent owns its own added short-id element, with the value the agent emitted
-  expect(db).toBeDefined();
-  expect(db!.x).toBe(999);
 });
 
 // diffById must not depend on element array order: shuffling current yields the
