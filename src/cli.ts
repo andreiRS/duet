@@ -3,6 +3,90 @@ import { createServer, type ServerHandle, type Scene } from "./server";
 import { watchScene, type WatchHandle } from "./watch";
 import { EchoGuard, hashContent, type ShapedScene } from "./writeback";
 
+// Default animation duration for camera fit (ms). Exact value tuned in #24.
+const CAMERA_FIT_DURATION_MS = 300;
+
+export interface CameraResult {
+  code: 0 | 1 | 2;
+  stdout?: string;
+  stderr?: string;
+}
+
+/**
+ * Parse and run the `camera` subcommand.
+ * @param argv  The args AFTER "camera" (e.g. ["--port", "3737", "--no-animate"])
+ * @param env   An env-var map (e.g. process.env). Used for DUET_PORT fallback.
+ * @returns     A result object — does NOT call process.exit or write to console.
+ */
+export async function runCameraCommand(
+  argv: string[],
+  env: Record<string, string | undefined>,
+): Promise<CameraResult> {
+  // Parse flags
+  let portArg: number | undefined;
+  let animate = true;
+  const ids: string[] = [];
+  let hasTo = false;
+
+  for (let i = 0; i < argv.length; i++) {
+    const arg = argv[i];
+    if (arg === "--port") {
+      portArg = parseInt(argv[++i] ?? "", 10);
+    } else if (arg === "--no-animate") {
+      animate = false;
+    } else if (arg === "--to") {
+      const raw = argv[++i] ?? "";
+      ids.push(...raw.split(",").filter(Boolean));
+      hasTo = true;
+    }
+  }
+
+  // Port precedence: --port flag > DUET_PORT env > 3737 default
+  const port = portArg ?? (env["DUET_PORT"] ? parseInt(env["DUET_PORT"]!, 10) : 3737);
+
+  // Build request body
+  const body: Record<string, unknown> = {
+    op: "fit",
+    animate,
+    duration: CAMERA_FIT_DURATION_MS,
+  };
+  if (hasTo) {
+    body.to = ids;
+  }
+
+  // POST to server
+  let resp: Response;
+  try {
+    resp = await fetch(`http://localhost:${port}/camera`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+  } catch {
+    return {
+      code: 2,
+      stderr: `duet: no server on localhost:${port} — start one with \`duet <file>\``,
+    };
+  }
+
+  const json = await resp.json();
+
+  if (!resp.ok) {
+    return { code: 1, stdout: JSON.stringify(json) };
+  }
+
+  const framed = (json as { framed: number }).framed;
+  if (framed === 0) {
+    return {
+      code: 0,
+      stdout: JSON.stringify(json),
+      stderr: "duet: 0 tabs connected",
+    };
+  }
+
+  return { code: 0, stdout: JSON.stringify(json) };
+}
+
 export const EMPTY_SCENE: ShapedScene = {
   type: "excalidraw",
   version: 2,
@@ -71,6 +155,15 @@ export function bootstrap({
 }
 
 if (import.meta.main) {
+  if (process.argv[2] === "camera") {
+    // Short-lived POST client — boots no server, no watcher
+    const cameraArgv = process.argv.slice(3); // args after "camera"
+    const result = await runCameraCommand(cameraArgv, process.env as Record<string, string | undefined>);
+    if (result.stdout) process.stdout.write(result.stdout + "\n");
+    if (result.stderr) process.stderr.write(result.stderr + "\n");
+    process.exit(result.code);
+  }
+
   const filePath = process.argv[2];
   if (!filePath) {
     console.error("Usage: duet <path-to-scene.excalidraw>");

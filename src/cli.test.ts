@@ -2,7 +2,8 @@ import { describe, it, expect, afterEach } from "bun:test";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
-import { ensureScene, bootstrap } from "./cli";
+import { ensureScene, bootstrap, runCameraCommand } from "./cli";
+import { createServer } from "./server";
 import { open } from "./open";
 
 let tmpDir: string;
@@ -275,5 +276,156 @@ describe("agent save reaches watcher and broadcasts (issue #7 AC4)", () => {
     const msg = await broadcastP;
     expect(msg.scene.source).toBe("my-agent");
     expect(msg.scene.elements.some((e: any) => e.id === "agent-el")).toBe(true);
+  });
+});
+
+// ─── Issue #22: duet camera fit CLI client + exit codes ──────────────────────
+
+function makeFakeDistDir(): string {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "duet-camera-test-dist-"));
+  fs.writeFileSync(path.join(dir, "index.html"), "<html><body>duet</body></html>");
+  return dir;
+}
+
+describe("runCameraCommand", () => {
+  it("returns code 0 with {framed:N} on stdout when server has elements and tabs", async () => {
+    const dir = makeFakeDistDir();
+    servers.push({ stop: () => fs.rmSync(dir, { recursive: true, force: true }) });
+    const srv = createServer({ port: 0, distDir: dir });
+    servers.push(srv.server);
+    srv.setScene({
+      type: "excalidraw", version: 2, elements: [{ id: "el1" }], appState: {}, files: {},
+    });
+
+    // Connect a WS tab so framed >= 1
+    const ws = new WebSocket(`ws://localhost:${srv.server.port}/`);
+    handles.push({ close: async () => ws.close() });
+    await new Promise<void>((res, rej) => {
+      ws.addEventListener("open", () => res(), { once: true });
+      ws.addEventListener("error", (e) => rej(e), { once: true });
+    });
+    // consume replay
+    await new Promise<void>((res) => ws.addEventListener("message", () => res(), { once: true }));
+
+    const result = await runCameraCommand(["--port", String(srv.server.port)], {});
+
+    expect(result.code).toBe(0);
+    expect(JSON.parse(result.stdout ?? "{}")).toMatchObject({ framed: 1 });
+    expect(result.stderr ?? "").toBe("");
+  });
+
+  it("returns code 0 with {framed:0} on stdout and a warning on stderr when zero tabs are connected", async () => {
+    const dir = makeFakeDistDir();
+    servers.push({ stop: () => fs.rmSync(dir, { recursive: true, force: true }) });
+    const srv = createServer({ port: 0, distDir: dir });
+    servers.push(srv.server);
+    srv.setScene({
+      type: "excalidraw", version: 2, elements: [{ id: "el1" }], appState: {}, files: {},
+    });
+    // No WS tab connected
+
+    const result = await runCameraCommand(["--port", String(srv.server.port)], {});
+
+    expect(result.code).toBe(0);
+    expect(JSON.parse(result.stdout ?? "{}")).toMatchObject({ framed: 0 });
+    expect(result.stderr ?? "").toContain("0 tabs");
+  });
+
+  it("returns code 1 with {missing:[...]} on stdout when --to references unknown ids", async () => {
+    const dir = makeFakeDistDir();
+    servers.push({ stop: () => fs.rmSync(dir, { recursive: true, force: true }) });
+    const srv = createServer({ port: 0, distDir: dir });
+    servers.push(srv.server);
+    srv.setScene({
+      type: "excalidraw", version: 2, elements: [{ id: "real-el" }], appState: {}, files: {},
+    });
+
+    const result = await runCameraCommand(
+      ["--port", String(srv.server.port), "--to", "bogus"],
+      {},
+    );
+
+    expect(result.code).toBe(1);
+    const body = JSON.parse(result.stdout ?? "{}");
+    expect(body.missing).toContain("bogus");
+  }, 2000);
+
+  it("returns code 2 with a stderr hint when no server is reachable", async () => {
+    // Start a server just to grab a random port, then stop it before POST
+    const dir = makeFakeDistDir();
+    servers.push({ stop: () => fs.rmSync(dir, { recursive: true, force: true }) });
+    const srv = createServer({ port: 0, distDir: dir });
+    const deadPort = srv.server.port;
+    srv.server.stop(true);
+
+    const result = await runCameraCommand(["--port", String(deadPort)], {});
+
+    expect(result.code).toBe(2);
+    expect(result.stderr ?? "").toContain(String(deadPort));
+  });
+
+  it("sends animate:true by default and animate:false with --no-animate (verified via WS camera message)", async () => {
+    const dir = makeFakeDistDir();
+    servers.push({ stop: () => fs.rmSync(dir, { recursive: true, force: true }) });
+    const srv = createServer({ port: 0, distDir: dir });
+    servers.push(srv.server);
+    srv.setScene({
+      type: "excalidraw", version: 2, elements: [{ id: "el1" }], appState: {}, files: {},
+    });
+
+    const ws = new WebSocket(`ws://localhost:${srv.server.port}/`);
+    handles.push({ close: async () => ws.close() });
+    await new Promise<void>((res, rej) => {
+      ws.addEventListener("open", () => res(), { once: true });
+      ws.addEventListener("error", (e) => rej(e), { once: true });
+    });
+    // consume replay
+    await new Promise<void>((res) => ws.addEventListener("message", () => res(), { once: true }));
+
+    // Helper: collect next message of type "camera"
+    function nextCameraMsg(): Promise<any> {
+      return new Promise((res, rej) => {
+        const timer = setTimeout(() => rej(new Error("timeout waiting for camera msg")), 2000);
+        ws.addEventListener("message", (e) => {
+          const msg = JSON.parse(e.data as string);
+          if (msg.type === "camera") { clearTimeout(timer); res(msg); }
+        }, { once: true });
+      });
+    }
+
+    // Default: animate:true
+    const p1 = nextCameraMsg();
+    await runCameraCommand(["--port", String(srv.server.port)], {});
+    const msg1 = await p1;
+    expect(msg1.animate).toBe(true);
+
+    // --no-animate: animate:false
+    const p2 = nextCameraMsg();
+    await runCameraCommand(["--port", String(srv.server.port), "--no-animate"], {});
+    const msg2 = await p2;
+    expect(msg2.animate).toBe(false);
+  }, 5000);
+
+  it("resolves port from --port flag, then DUET_PORT env, then 3737 default", async () => {
+    const dir = makeFakeDistDir();
+    servers.push({ stop: () => fs.rmSync(dir, { recursive: true, force: true }) });
+    const srv = createServer({ port: 0, distDir: dir });
+    servers.push(srv.server);
+    srv.setScene({
+      type: "excalidraw", version: 2, elements: [{ id: "el1" }], appState: {}, files: {},
+    });
+    const p = srv.server.port;
+
+    // --port flag wins over DUET_PORT env
+    const r1 = await runCameraCommand(["--port", String(p)], { DUET_PORT: "9999" });
+    expect(r1.code).toBe(0);
+
+    // DUET_PORT env used when no --port flag
+    const r2 = await runCameraCommand([], { DUET_PORT: String(p) });
+    expect(r2.code).toBe(0);
+
+    // Default 3737 used when nothing set — server is not on 3737, so we get code 2
+    const r3 = await runCameraCommand([], {});
+    expect(r3.code).toBe(2);
   });
 });
