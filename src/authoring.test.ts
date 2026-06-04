@@ -76,6 +76,24 @@ describe("element ids are deterministic", () => {
   });
 });
 
+// #26: Duet authors text in the handdrawn font (Excalifont, fontFamily 5),
+// Excalidraw's current default, not Helvetica (2) which renders as a plain sans.
+describe("authored text uses the handdrawn Excalifont family", () => {
+  test("bound label text has fontFamily 5", () => {
+    const s = scene();
+    s.labeledRect("box1", 0, 0, 100, 50, PALETTE.light.blue, "Label", 14);
+    const textEl = s.build().elements.find((e) => e.id === "box1_t");
+    expect(textEl!.fontFamily).toBe(5);
+  });
+
+  test("standalone text has fontFamily 5", () => {
+    const s = scene();
+    s.text("t1", 0, 0, "hello", 16);
+    const textEl = s.build().elements.find((e) => e.id === "t1");
+    expect(textEl!.fontFamily).toBe(5);
+  });
+});
+
 // AC1: build() returns valid Excalidraw JSON with required fields
 describe("build() returns valid Excalidraw JSON", () => {
   test("top-level shape is correct", () => {
