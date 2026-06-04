@@ -35,7 +35,7 @@ export function load(filePath: string): LoadedScene {
     },
 
     save(opts?: { source?: string }): void {
-      atomicWriteScene(filePath, { elements, appState }, opts?.source ?? parsed.source ?? "duet");
+      atomicWriteScene(filePath, { elements, appState }, opts?.source ?? "duet");
     },
   };
 }

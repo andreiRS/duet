@@ -93,7 +93,7 @@ describe("byte-stable save (AC4: changing one element leaves others untouched)",
     target.label = "updated";
     target.x = 99;
 
-    loaded.save({});
+    loaded.save();
 
     // Re-load and check
     const reloaded = load(filePath);
@@ -129,7 +129,7 @@ describe("save({ source? }) API — no EchoGuard argument (issue #7 AC1)", () =>
     target.x = 42;
 
     // New API: no guard argument
-    loaded.save({});
+    loaded.save();
 
     const onDisk = JSON.parse(fs.readFileSync(filePath, "utf8"));
     expect(onDisk.elements[0].x).toBe(42);
@@ -170,6 +170,31 @@ describe("save({ source }) sets the source field in the written file (issue #7 A
     const loaded = load(filePath);
 
     loaded.save();
+
+    const onDisk = JSON.parse(fs.readFileSync(filePath, "utf8"));
+    expect(onDisk.source).toBe("duet");
+  });
+
+  it("defaults to 'duet' even when the file already has a different source", () => {
+    // AC5: source defaults to the agent tag "duet", NOT the file's existing source.
+    const dir = makeTmpDir();
+    // Write a file that already has source: "https://excalidraw.com"
+    const filePath = path.join(dir, "scene.excalidraw");
+    fs.writeFileSync(
+      filePath,
+      JSON.stringify({
+        type: "excalidraw",
+        version: 2,
+        source: "https://excalidraw.com",
+        elements: [],
+        appState: {},
+        files: {},
+      }),
+      "utf8",
+    );
+
+    const loaded = load(filePath);
+    loaded.save(); // no source arg
 
     const onDisk = JSON.parse(fs.readFileSync(filePath, "utf8"));
     expect(onDisk.source).toBe("duet");
