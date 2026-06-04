@@ -20,20 +20,23 @@ Usage:
                                 and open the scene in your browser. Edit the file
                                 directly to drive the canvas. Errors if the file is
                                 missing (create it with \`duet new\`).
-  duet camera [options]         Move the browser camera in every connected tab.
+  duet camera fit [options]     Fit (zoom + center) the browser camera to the
+                                scene, in every connected tab.
+  duet camera zoom              Not implemented yet.
+  duet camera pan               Not implemented yet.
   duet --help                   Show this help.
 
 Options:
   --port <n>                    Port for the Duet server
                                 (default 3737, or the DUET_PORT env var).
 
-camera options:
+camera fit options:
   --to <id1,id2,...>            Fit (zoom + center) the view to these element ids.
                                 Omit to fit the whole scene. ids are the "id" fields
                                 of elements in the .excalidraw file.
   --no-animate                  Jump instantly instead of animating the move.
 
-camera output (stdout, JSON) and exit codes:
+camera fit output (stdout, JSON) and exit codes:
   {"framed":<n>}                exit 0, n tabs moved (n may be 0 if no browser is open).
   {"missing":[<id>,...]}        exit 1, one or more --to ids are not in the scene.
   (stderr hint, no JSON)        exit 2, no server reachable on the port.
@@ -41,9 +44,9 @@ camera output (stdout, JSON) and exit codes:
 Examples:
   duet new ./scene.excalidraw                   # scaffold a blank scene
   duet serve ./scene.excalidraw                 # serve it + open the browser
-  duet camera                                   # fit the whole scene
-  duet camera --to aB3xK9,Qz7Lm2                # zoom to two elements
-  duet camera --to aB3xK9 --no-animate          # snap, no animation
+  duet camera fit                               # fit the whole scene
+  duet camera fit --to aB3xK9,Qz7Lm2            # zoom to two elements
+  duet camera fit --to aB3xK9 --no-animate      # snap, no animation
 `;
 
 export interface CameraResult {
@@ -291,8 +294,20 @@ if (import.meta.main) {
       },
     });
   } else if (argv[0] === "camera") {
-    // Short-lived POST client — boots no server, no watcher
-    const cameraArgv = argv.slice(1); // args after "camera"
+    // Short-lived POST client — boots no server, no watcher.
+    // camera takes an op: `fit` (implemented), `zoom`/`pan` (planned).
+    const op = argv[1];
+    if (op === "zoom" || op === "pan") {
+      process.stderr.write(`duet: camera ${op} is not implemented yet\n`);
+      process.exit(1);
+    }
+    if (op !== "fit") {
+      process.stderr.write(
+        "duet: camera needs an op, e.g. `duet camera fit` (zoom, pan not implemented)\n",
+      );
+      process.exit(1);
+    }
+    const cameraArgv = argv.slice(2); // args after "camera fit"
     const result = await runCameraCommand(cameraArgv, process.env as Record<string, string | undefined>);
     if (result.stdout) process.stdout.write(result.stdout + "\n");
     if (result.stderr) process.stderr.write(result.stderr + "\n");

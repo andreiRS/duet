@@ -298,6 +298,13 @@ describe("HELP", () => {
     expect(HELP).toContain("--no-animate");
     expect(HELP).toContain("--port");
     expect(HELP).toContain("framed");
+    expect(HELP).toContain("duet camera fit");
+  });
+
+  it("lists the planned camera ops and marks them not implemented", () => {
+    expect(HELP).toContain("camera zoom");
+    expect(HELP).toContain("camera pan");
+    expect(HELP).toContain("Not implemented");
   });
 
   it("documents the camera exit codes and failure shapes", () => {
@@ -323,6 +330,43 @@ describe("HELP", () => {
     expect(out).toContain("duet serve");
     expect(out).toContain("duet camera");
     expect(out).toContain("--to");
+  });
+});
+
+describe("camera op dispatch (binary)", () => {
+  async function runCli(args: string[]): Promise<{ code: number; err: string }> {
+    const proc = Bun.spawn(["bun", "run", "src/cli.ts", ...args], {
+      cwd: process.cwd(),
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    const err = await new Response(proc.stderr).text();
+    const code = await proc.exited;
+    return { code, err };
+  }
+
+  it("rejects `camera zoom` as not implemented, exit 1", async () => {
+    const { code, err } = await runCli(["camera", "zoom"]);
+    expect(code).toBe(1);
+    expect(err).toContain("not implemented");
+  });
+
+  it("rejects `camera pan` as not implemented, exit 1", async () => {
+    const { code, err } = await runCli(["camera", "pan"]);
+    expect(code).toBe(1);
+    expect(err).toContain("not implemented");
+  });
+
+  it("requires an op: bare `camera` errors and points at `camera fit`, exit 1", async () => {
+    const { code, err } = await runCli(["camera"]);
+    expect(code).toBe(1);
+    expect(err).toContain("duet camera fit");
+  });
+
+  it("routes `camera fit` to the fit client (exit 2 with no server)", async () => {
+    // A dead port proves fit ran: it reaches runCameraCommand's unreachable path.
+    const { code } = await runCli(["camera", "fit", "--port", "59999"]);
+    expect(code).toBe(2);
   });
 });
 

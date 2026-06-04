@@ -37,9 +37,9 @@ When the agent changes the scene it can also pull your view to the change, so yo
 never hunt for what just happened. The agent runs:
 
 ```sh
-duet camera                     # frame the whole scene
-duet camera --to id1,id2        # frame just these elements
-duet camera --no-animate        # jump instead of a smooth move
+duet camera fit                 # frame the whole scene
+duet camera fit --to id1,id2    # frame just these elements
+duet camera fit --no-animate    # jump instead of a smooth move
 ```
 
 Your view tweens (~400ms) to the new frame, and every open tab moves the same
