@@ -132,9 +132,9 @@ export function makeVerbs(els: El[], opts: { dark?: boolean } = {}): Verbs {
     };
   };
 
-  // Crude width estimate for STANDALONE text only.
-  // Bound labels (labeledRect, arrow label) store width=0 and let Excalidraw
-  // re-measure on load. geometry.ts uses the same 0.55 factor at check time.
+  // Width estimate: text.length * fontSize * 0.55.
+  // Used for STANDALONE text and BOUND labels alike.
+  // geometry.ts uses the same factor at check time for label-overflow detection.
   const w = (t: string, fs: number) => t.length * fs * 0.55;
 
   // Standalone text element
@@ -170,14 +170,15 @@ export function makeVerbs(els: El[], opts: { dark?: boolean } = {}): Verbs {
         boundElements: [{ type: "text", id: tid }],
       }),
     );
-    // Bound text: let Excalidraw measure and re-center on load.
-    // We store width=0 so no hand-computed 0.55 estimate pollutes the JSON.
+    // Bound text: store a non-zero width estimate so Excalidraw renders the
+    // label as legible text. Center the label x inside the box.
+    const labelW = w(label, fontSize);
     els.push(
       baseText({
         id: tid,
-        x: x + width / 2,
+        x: x + (width - labelW) / 2,
         y: y + (height - fontSize * 1.25) / 2,
-        width: 0,
+        width: labelW,
         height: fontSize * 1.25,
         text: label,
         fontSize,
@@ -193,23 +194,27 @@ export function makeVerbs(els: El[], opts: { dark?: boolean } = {}): Verbs {
   // Mutates arrowEl.boundElements and pushes the text element onto els.
   const pushArrowLabel = (
     arrowEl: El,
-    x1: number,
-    y1: number,
-    x2: number,
-    y2: number,
+    startX: number,
+    endX: number,
+    startY: number,
+    endY: number,
     label: string,
     color: string,
   ) => {
     const tid = arrowEl.id + "_t";
     arrowEl.boundElements = [{ type: "text", id: tid }];
     els.push(arrowEl);
-    // Bound text: width=0 so Excalidraw measures and re-centers on load.
+    // Bound text: store a non-zero width estimate so Excalidraw renders the
+    // label as legible text. Center the label on the arrow midpoint.
+    const arrowLabelW = w(label, 14);
+    const mx = (startX + endX) / 2;
+    const my = (startY + endY) / 2;
     els.push(
       baseText({
         id: tid,
-        x: x1 + (x2 - x1) / 2,
-        y: y1 + (y2 - y1) / 2 - 10,
-        width: 0,
+        x: mx - arrowLabelW / 2,
+        y: my - 10,
+        width: arrowLabelW,
         height: 20,
         text: label,
         fontSize: 14,
