@@ -9,6 +9,7 @@
 
 import type { ExcalidrawScene, El } from "./scene-types";
 export type { El } from "./scene-types";
+import { measuredTextHeight, BOUND_TEXT_PADDING } from "./bound-text";
 
 // [zoneBg, boxFill, accent] per family
 export const PALETTE = {
@@ -156,6 +157,12 @@ export function makeVerbs(els: El[], opts: { dark?: boolean } = {}): Verbs {
   ) => {
     const [, fill, accent] = fam;
     const tid = id + "_t";
+    // Measure the label for ALL its lines (#25). A label with "\n" newlines is
+    // taller than one line; grow the box so every line is contained, matching
+    // Excalidraw's bound-text padding.
+    const labelH = measuredTextHeight(label, fontSize);
+    const usableH = height - BOUND_TEXT_PADDING * 2;
+    const boxH = labelH > usableH ? labelH + BOUND_TEXT_PADDING * 2 : height;
     els.push(
       base({
         type: "rectangle",
@@ -163,7 +170,7 @@ export function makeVerbs(els: El[], opts: { dark?: boolean } = {}): Verbs {
         x,
         y,
         width,
-        height,
+        height: boxH,
         backgroundColor: fill,
         fillStyle: "solid",
         strokeColor: accent,
@@ -173,15 +180,15 @@ export function makeVerbs(els: El[], opts: { dark?: boolean } = {}): Verbs {
       }),
     );
     // Bound text: store a non-zero width estimate so Excalidraw renders the
-    // label as legible text. Center the label x inside the box.
+    // label as legible text. Center the label inside the (possibly grown) box.
     const labelW = w(label, fontSize);
     els.push(
       baseText({
         id: tid,
         x: x + (width - labelW) / 2,
-        y: y + (height - fontSize * 1.25) / 2,
+        y: y + (boxH - labelH) / 2,
         width: labelW,
-        height: fontSize * 1.25,
+        height: labelH,
         text: label,
         fontSize,
         strokeColor: DARK ? "#e5e5e5" : "#1e1e1e",
