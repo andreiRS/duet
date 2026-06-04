@@ -300,12 +300,8 @@ describe("runCameraCommand", () => {
     // Connect a WS tab so framed >= 1
     const ws = new WebSocket(`ws://localhost:${srv.server.port}/`);
     handles.push({ close: async () => ws.close() });
-    await new Promise<void>((res, rej) => {
-      ws.addEventListener("open", () => res(), { once: true });
-      ws.addEventListener("error", (e) => rej(e), { once: true });
-    });
-    // consume replay
-    await new Promise<void>((res) => ws.addEventListener("message", () => res(), { once: true }));
+    await wsOpen(ws);
+    await nextSceneMessage(ws); // consume replay
 
     const result = await runCameraCommand(["--port", String(srv.server.port)], {});
 
@@ -375,12 +371,8 @@ describe("runCameraCommand", () => {
 
     const ws = new WebSocket(`ws://localhost:${srv.server.port}/`);
     handles.push({ close: async () => ws.close() });
-    await new Promise<void>((res, rej) => {
-      ws.addEventListener("open", () => res(), { once: true });
-      ws.addEventListener("error", (e) => rej(e), { once: true });
-    });
-    // consume replay
-    await new Promise<void>((res) => ws.addEventListener("message", () => res(), { once: true }));
+    await wsOpen(ws);
+    await nextSceneMessage(ws); // consume replay
 
     // Helper: collect next message of type "camera"
     function nextCameraMsg(): Promise<any> {
@@ -405,6 +397,21 @@ describe("runCameraCommand", () => {
     const msg2 = await p2;
     expect(msg2.animate).toBe(false);
   }, 5000);
+
+  it("returns code 1 (not 2) with a usage error when --port is not a number", async () => {
+    const result = await runCameraCommand(["--port", "abc"], {});
+
+    expect(result.code).toBe(1);
+    expect(result.stderr ?? "").toContain("--port requires a number");
+    expect(result.stdout ?? "").toBe("");
+  });
+
+  it("returns code 1 with a usage error when DUET_PORT env is not a number", async () => {
+    const result = await runCameraCommand([], { DUET_PORT: "foo" });
+
+    expect(result.code).toBe(1);
+    expect(result.stderr ?? "").toContain("--port requires a number");
+  });
 
   it("resolves port from --port flag, then DUET_PORT env, then 3737 default", async () => {
     const dir = makeFakeDistDir();
