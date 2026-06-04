@@ -29,8 +29,10 @@ export interface CameraScrollArgs {
   };
 }
 
-// Default animation duration when the message omits `duration`.
-export const CAMERA_DEFAULT_DURATION_MS = 300;
+// Default animation duration when the message omits `duration`. Tuned to 400ms
+// in #24 (300ms felt a touch fast on the canvas). Kept in sync with
+// CAMERA_FIT_DURATION_MS in cli.ts, which is what the CLI actually sends.
+export const CAMERA_DEFAULT_DURATION_MS = 400;
 
 export function resolveCameraScroll(
   msg: CameraMessage,

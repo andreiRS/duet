@@ -3,8 +3,10 @@ import { createServer, type ServerHandle, type Scene } from "./server";
 import { watchScene, type WatchHandle } from "./watch";
 import { EchoGuard, hashContent, type ShapedScene } from "./writeback";
 
-// Default animation duration for camera fit (ms). Exact value tuned in #24.
-const CAMERA_FIT_DURATION_MS = 300;
+// Default animation duration for camera fit (ms). Tuned to 400ms in #24.
+// Keep in sync with CAMERA_DEFAULT_DURATION_MS (camera.ts), the browser-side
+// fallback for a non-CLI POST.
+const CAMERA_FIT_DURATION_MS = 400;
 
 export interface CameraResult {
   code: 0 | 1 | 2;
