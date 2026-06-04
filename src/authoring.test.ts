@@ -189,9 +189,7 @@ describe("bound-label width uses 0.55 estimate (issue #14)", () => {
     const pts = arrowEl!.points as number[][];
     const lastPt = pts[pts.length - 1];
     const startAbsX = arrowEl!.x as number;
-    const startAbsY = arrowEl!.y as number;
     const endAbsX = startAbsX + lastPt[0];
-    const endAbsY = startAbsY + lastPt[1];
     const midX = (startAbsX + endAbsX) / 2;
 
     const labelWidth = label.length * 14 * 0.55;
