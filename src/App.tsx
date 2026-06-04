@@ -16,7 +16,7 @@ type ExcalidrawAPI = {
   getSceneElements: () => readonly unknown[];
   getSceneElementsIncludingDeleted: () => readonly unknown[];
   scrollToContent: (
-    target: readonly unknown[],
+    target: readonly El[],
     opts: { fitToContent: true; animate: boolean; duration: number },
   ) => void;
 };
@@ -144,7 +144,7 @@ export default function App() {
   function applyCamera(msg: CameraMessage) {
     const api = apiRef.current;
     if (!api) return;
-    const elements = (api.getSceneElements() ?? []) as El[];
+    const elements = api.getSceneElements() as El[];
     const args = resolveCameraScroll(msg, elements);
     if (!args) return; // nothing to frame
     api.scrollToContent(args.targets, args.options);
