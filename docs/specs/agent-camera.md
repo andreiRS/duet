@@ -89,7 +89,7 @@ malformed/partial read" safety, and validates against exactly what tabs are
 converging to.
 
 **Dispatch:** `duet camera …` is a subcommand branched in `cli.ts`
-(`argv[2] === "camera"`). Unlike `duet <file>`, it boots no server and no
+(`argv[2] === "camera"`). Unlike `duet serve <file>`, it boots no server and no
 watcher — it is a short-lived client that POSTs to `localhost:${port}` and
 exits. Port resolves `--port` flag → `DUET_PORT` env → `3737` default, the same
 precedence the server uses, so a human who moved the server passes the same

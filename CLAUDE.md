@@ -10,9 +10,10 @@ tab in sync. See `README.md` for the user-facing overview.
 
 ```sh
 bun install
-bun test                          # full suite (114 tests)
+bun test                          # full suite (300 tests)
 bun test src/server.test.ts       # one file
-bun run duet ./scene.excalidraw   # run the real server (HTTP + WS + file watch)
+bun run duet new ./scene.excalidraw    # scaffold a blank scene (skip if it exists)
+bun run duet serve ./scene.excalidraw  # run the real server (HTTP + WS + file watch)
 bun run build                     # build the client into dist/
 ```
 
@@ -20,13 +21,19 @@ Use `bun`, never `npm`.
 
 ## Running the server
 
-`bun run duet <file>` runs `src/cli.ts` directly. **Bun does not hot-reload**, so
-after editing any server-side file (`server.ts`, `watch.ts`, `writeback.ts`,
-`cli.ts`) you must **restart the process** for changes to take effect. The client
-(`App.tsx`) is served from `dist/`, so client changes need `bun run build`.
+`bun run duet serve <file>` runs `src/cli.ts` directly. **Bun does not
+hot-reload**, so after editing any server-side file (`server.ts`, `watch.ts`,
+`writeback.ts`, `cli.ts`) you must **restart the process** for changes to take
+effect. The client (`App.tsx`) is served from `dist/`, so client changes need
+`bun run build`.
+
+The CLI is a verb family: `duet new <file>` (scaffold, errors if it exists),
+`duet serve <file>` (run the server, errors if the file is missing), `duet
+camera` (move the view). There is no positional `duet <file>` form.
 
 `bun run dev` (Vite) serves only the client, the WS file-sync server is not
-running there, so it cannot test sync. Always test sync through `bun run duet`.
+running there, so it cannot test sync. Always test sync through `bun run duet
+serve`.
 
 ## Architecture
 

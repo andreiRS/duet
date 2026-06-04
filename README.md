@@ -9,11 +9,13 @@ to the same file so the agent sees them. One file, both directions.
 
 ```sh
 bun install
-bun run duet path/to/scene.excalidraw   # creates the file if missing
+bun run duet new path/to/scene.excalidraw     # scaffold a blank scene (skip if you have one)
+bun run duet serve path/to/scene.excalidraw   # start the server + open the browser
 ```
 
-Opens http://localhost:3737 in your browser. Open more tabs at the same URL,
-they all stay in sync.
+`serve` opens http://localhost:3737 in your browser. Open more tabs at the same
+URL, they all stay in sync. `serve` errors if the file is missing, so a typo
+fails loudly instead of serving a blank canvas, create it with `new` first.
 
 ## How it works
 
@@ -35,9 +37,9 @@ When the agent changes the scene it can also pull your view to the change, so yo
 never hunt for what just happened. The agent runs:
 
 ```sh
-duet camera fit                 # frame the whole scene
-duet camera fit --to id1,id2    # frame just these elements
-duet camera fit --no-animate    # jump instead of a smooth move
+duet camera                     # frame the whole scene
+duet camera --to id1,id2        # frame just these elements
+duet camera --no-animate        # jump instead of a smooth move
 ```
 
 Your view tweens (~400ms) to the new frame, and every open tab moves the same
@@ -55,7 +57,7 @@ bun run build     # build the client into dist/
 ```
 
 Note: `bun run dev` serves only the React client through Vite, the WebSocket
-file-sync server is not running, so use `bun run duet` to test sync.
+file-sync server is not running, so use `bun run duet serve` to test sync.
 
 ## Layout
 
