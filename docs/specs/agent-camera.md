@@ -34,9 +34,18 @@ agent → `duet camera ...` (CLI) → HTTP POST /camera → server → ws.publis
 
 The browser receives a distinct `{type:"camera"}` message on a **separate**
 `applyCamera()` path that just calls `api.scrollToContent(elements, {
-fitToContent: true })`. It runs none of the content-sync machinery — no scene
-version re-stamp, no remote-apply guard, no "Agent updated the canvas" flash —
-because no content changed. The view move is **silent**.
+fitToContent: true, animate: true, duration, maxZoom })`. It runs none of the
+content-sync machinery — no scene version re-stamp, no remote-apply guard, no
+"Agent updated the canvas" flash — because no content changed. The view move is
+**silent**. It also needs no save-suppression logic: the client's save-gate keys
+on the element version (`sceneVersion`), and a `scrollToContent` only mutates
+`scroll*`/`zoom`, so the gate already swallows it. `applyCamera()` never calls
+`updateScene`, so there is nothing to guard.
+
+The move is **animated** with a small tween — `animate: true`, `duration` ~300ms
+(Excalidraw's built-in ease-out; we control on/off and duration, not the curve),
+and `maxZoom: 1` so framing a single small element does not blow up to a
+disorienting zoom. The agent can request an instant jump with `--no-animate`.
 
 Two operations:
 
@@ -48,17 +57,42 @@ Two operations:
 
 The **server validates** requested ids against its `currentScene` before
 publishing — the only place that makes the CLI's exit code honest, since tabs
-are fire-and-forget after `ws.publish`. The CLI gets full signal: no server →
-non-zero exit with a hint; success → `{ framed: N }` tab count; zero tabs →
-succeed with a warning; missing ids / empty scene → 4xx + the missing ids +
-non-zero exit.
+are fire-and-forget after `ws.publish`. Validation is **all-or-nothing**: if any
+requested id is missing (after the retry window), nothing is published and no
+tab moves, so the agent never gets a *different* viewport than it asked for. The
+`framed: N` count is the size of a live `Set` of open WebSockets the server
+keeps (`add` on `open`, `delete` on `close`); `ws.publish`'s byte count can't
+tell one tab from five, so the set is the honest source.
+
+The CLI gets full signal via a JSON object on stdout (`{ framed, missing? }`)
+plus a branchable exit code:
+
+- success (≥1 tab framed) → exit `0`, `{ framed: N }`.
+- zero tabs connected → exit `0` with a stderr warning, `{ framed: 0 }`.
+- bad request (missing ids, or empty scene on a plain `fit`) → exit `1`, 4xx,
+  `{ missing: [...] }`.
+- no server reachable → exit `2` with a hint.
+
+Two failure codes so the eyeless agent can branch: `1` = "my ids/scene are
+wrong, fix and retry" vs `2` = "no server, start one or give up."
 
 **Write-then-frame race:** the agent's common flow is write the file, then
 immediately `fit --to <new-id>`. The server's `currentScene` updates only after
-file → watcher → parse, which is async. So on a missing id the server **retries
-validation for a short window (~300–500ms)** before failing; the watcher almost
-always lands in that window, so the just-written id resolves, while a genuinely
-bad id still fails after it.
+file → watcher → parse, which is async. So on a missing id the server **polls
+`currentScene`** (the watcher's value, not a direct file re-read) every ~50ms up
+to a **400ms** ceiling before failing; the watcher almost always lands in that
+window, so the just-written id resolves, while a genuinely bad id still fails
+after it. Polling `currentScene` (rather than re-reading the file in the camera
+handler) reuses the watcher pipeline, including its "keep last good scene on a
+malformed/partial read" safety, and validates against exactly what tabs are
+converging to.
+
+**Dispatch:** `duet camera …` is a subcommand branched in `cli.ts`
+(`argv[2] === "camera"`). Unlike `duet <file>`, it boots no server and no
+watcher — it is a short-lived client that POSTs to `localhost:${port}` and
+exits. Port resolves `--port` flag → `DUET_PORT` env → `3737` default, the same
+precedence the server uses, so a human who moved the server passes the same
+override. A refused connection is the exit-`2` case.
 
 All tabs follow a camera command (one broadcast, no per-tab targeting), matching
 "the agent is framing the work for whoever is watching."
@@ -71,10 +105,17 @@ All tabs follow a camera command (one broadcast, no per-tab targeting), matching
   the whole scene, computed from each tab's real canvas size.
 - As the agent, I can run `duet camera fit --to id,id` and every tab frames the
   union of those elements' bounding boxes.
-- As the agent, I get an honest exit code and message: server down, tabs framed,
-  zero tabs connected, or unknown/empty ids — so I can branch without eyes.
+- As the agent, I get an honest exit code and message: server down (`2`), tabs
+  framed (`0`), zero tabs connected (`0` + warning), or unknown/empty ids (`1`) —
+  plus a `{ framed, missing? }` JSON object on stdout — so I can branch without
+  eyes.
 - As the agent, I can frame an element I just wrote without a race failure,
-  because the server briefly retries id validation.
+  because the server briefly polls `currentScene` before failing id validation.
+- As the agent, my framed set is all-or-nothing: if I name any id that doesn't
+  exist, no tab moves and I get told which id was missing, so I never land a tab
+  on a viewport I didn't ask for.
+- As the human, the view tweens to the new frame (~300ms) instead of jumping, so
+  I keep my bearings; the agent can opt into an instant jump with `--no-animate`.
 
 ### Out of scope
 
@@ -83,7 +124,14 @@ All tabs follow a camera command (one broadcast, no per-tab targeting), matching
   gives it eyes.
 - **Region by raw bbox** (`--region x,y,w,h`) — ids only for this slice.
 - **Per-tab follow control** (a "follow agent camera" toggle) — all tabs follow.
-- **A visual cue / toast** on view move — deliberately silent.
+- **A visual cue / toast** on view move — deliberately silent (the tween is the
+  only feedback).
+- **Per-call animation tuning beyond `--no-animate`** (`--duration`, easing
+  choice) — duration is a fixed default we tweak in testing, not a CLI flag;
+  Excalidraw owns the easing curve.
+- **Headless/Playwright test of the browser move** — `applyCamera` is
+  manual-tested; only the server contract is unit-tested (see Success Criteria).
+  Revisit when the snapshot loop (idea #2) brings a headless renderer.
 - **Camera state in the file** — out of band by design (ADR-0005); the whitelist
   exclusion of `scroll*`/`zoom` stands.
 - **Multi-server / port discovery** — one server at a time on a fixed default
@@ -97,12 +145,20 @@ All tabs follow a camera command (one broadcast, no per-tab targeting), matching
   move identically.
 - `duet camera fit` with no server running exits non-zero and names the cause;
   with a server but zero tabs it exits zero with a "0 tabs" warning.
-- `duet camera fit --to bogus` exits non-zero and reports `bogus` as missing,
-  and no tab moves.
-- Writing a new element then immediately framing it by id succeeds (the retry
-  window absorbs the watcher lag).
-- The camera path is covered by `bun:test`: server-side id validation against
-  `currentScene`, the framed-count response, and the retry-on-missing window.
+- `duet camera fit --to bogus` exits `1` and reports `bogus` as missing, and no
+  tab moves.
+- `duet camera fit --to good,bogus` (one valid, one missing) also exits `1` and
+  moves no tab — all-or-nothing, never a partial frame.
+- `duet camera fit` on an empty scene exits `1` ("nothing to frame") and no tab
+  moves.
+- Writing a new element then immediately framing it by id succeeds (the ~400ms
+  poll of `currentScene` absorbs the watcher lag).
+- The view move is animated by default and instant under `--no-animate`.
+- The **server contract** is covered by `bun:test`: id validation against
+  `currentScene`, all-or-nothing rejection with the missing list, empty-scene
+  rejection, the `framed` count from the live client set (incl. zero tabs), and
+  the poll-on-missing window. The browser `applyCamera` move and the
+  byte-identical-file guarantee are verified by a documented manual check.
 
 ## Constraints
 
@@ -115,6 +171,10 @@ All tabs follow a camera command (one broadcast, no per-tab targeting), matching
   trip the echo guard, bump scene version, or flash — it is not a content path.
 - The fit is computed in the **browser** (`api.scrollToContent`), never
   server-side; the server only validates ids and fans out.
+- The server tracks open tabs with a live `Set` of WebSockets so `framed: N` is
+  honest; `ws.publish`'s byte count is not a tab count.
+- `duet camera …` boots no server/watcher — it is a short-lived POST client.
+  Port precedence (`--port` → `DUET_PORT` → `3737`) matches the server's.
 
 ## Open Questions / Risks
 
@@ -125,6 +185,11 @@ All tabs follow a camera command (one broadcast, no per-tab targeting), matching
 - **All-tabs-follow can yank a focused human.** If two humans view different
   regions, a camera command moves both. Accepted given Duet's usual one-human
   shape; revisit with per-tab follow if it bites.
-- **Retry window tuning.** ~300–500ms is a guess; too short reintroduces the
-  race, too long delays a real bad-id error. Tune against the watcher's observed
-  latency.
+- **Poll-window ceiling.** Set at 400ms (50ms interval). Too short reintroduces
+  the write-then-frame race; too long delays a real bad-id error. Tune against
+  the watcher's observed latency in testing.
+- **`maxZoom` cap.** Starting at `1` so framing one small element does not zoom
+  past 100%. May be too tight (a small box ends up small on screen); prototype at
+  `1`, then test `2`–`3` and pick by feel. Left open deliberately.
+- **Tween duration.** Starting at ~300ms; a constant to tweak by feel during
+  testing, not a committed value.
