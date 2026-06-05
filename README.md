@@ -1,9 +1,13 @@
 # Duet
 
-**v0.1** — first working version. Live-sync an Excalidraw scene between an AI agent and your browser through a
-single `.excalidraw` file. The agent edits the file; Duet watches it and pushes
-changes to every open tab. You draw in the browser; Duet writes your edits back
-to the same file so the agent sees them. One file, both directions.
+**v0.1** — first working version.
+
+Build one Excalidraw diagram together with an AI agent. The agent drafts the
+structure (ids, geometry, layout) by editing a plain `.excalidraw` file with its
+normal file tools; you nudge the visuals in the browser. Both sides see each
+other's changes live, no click, no copy-paste. The file is the single source of
+truth and Duet keeps it in sync both ways, so a terminal agent that can't see a
+canvas and a human who won't hand-edit JSON can finally work on the same picture.
 
 ## Run
 
