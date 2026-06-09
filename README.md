@@ -1,5 +1,7 @@
 # Duet
 
+![How Duet works](https://i.ibb.co/99DMKd3G/duet-how-it-works-v2.png)
+
 **v0.1** — first working version.
 
 Build one Excalidraw diagram together with an AI agent. The agent drafts the
