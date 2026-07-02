@@ -1,5 +1,7 @@
 #!/usr/bin/env bun
 import * as fs from "fs";
+import * as os from "os";
+import * as path from "path";
 import { createServer, type ServerHandle, type Scene } from "./server";
 import { watchScene, type WatchHandle } from "./watch";
 import { EchoGuard, hashContent, type ShapedScene } from "./writeback";
@@ -34,6 +36,10 @@ Usage:
 Options:
   --port <n>                    Port for the Duet server
                                 (default 3737, or the DUET_PORT env var).
+                                The default falls back to the next free port
+                                when 3737 is busy; an explicit --port does not.
+                                camera finds the bound port via a discovery file
+                                (override its path with the DUET_PORT_FILE env var).
 
 ls options:
   --json                        Print a JSON array of {id,type,label} instead of
@@ -58,6 +64,56 @@ Examples:
   duet camera fit --to aB3xK9,Qz7Lm2            # zoom to two elements
   duet camera fit --to aB3xK9 --no-animate      # snap, no animation
 `;
+
+// --- Served-port discovery file -------------------------------------------
+// `duet serve` writes the port it actually bound to a small state file so that
+// a later `duet camera` (which resolves its port independently and takes no
+// file path) can still reach the server after a free-port fallback moved it off
+// the default 3737. The location is env-overridable so tests can point it at a
+// temp file.
+export interface ServedPortRecord {
+  port: number;
+  filePath: string;
+  pid: number;
+}
+
+export function discoveryPath(env: Record<string, string | undefined>): string {
+  return env.DUET_PORT_FILE ?? path.join(os.tmpdir(), "duet-serve.json");
+}
+
+export function writeServedPort(
+  env: Record<string, string | undefined>,
+  rec: ServedPortRecord,
+): void {
+  try {
+    fs.writeFileSync(discoveryPath(env), JSON.stringify(rec), "utf8");
+  } catch {
+    // Best-effort: a discovery-file write failure must never take down serve.
+  }
+}
+
+export function readServedPort(
+  env: Record<string, string | undefined>,
+): ServedPortRecord | null {
+  try {
+    const raw = fs.readFileSync(discoveryPath(env), "utf8");
+    const rec = JSON.parse(raw);
+    if (rec && typeof rec.port === "number" && Number.isInteger(rec.port) && rec.port > 0) {
+      return rec as ServedPortRecord;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+export function clearServedPort(env: Record<string, string | undefined>): void {
+  try {
+    fs.unlinkSync(discoveryPath(env));
+  } catch {
+    // Missing or already-removed file is fine.
+  }
+}
 
 export interface CameraResult {
   code: 0 | 1 | 2;
@@ -92,8 +148,12 @@ export async function runCameraCommand(
     }
   }
 
-  // Port precedence: --port flag > DUET_PORT env > 3737 default
-  const portRaw = portArg ?? env["DUET_PORT"] ?? "3737";
+  // Port precedence: --port flag > DUET_PORT env > served-port discovery file
+  // (where a free-port fallback may have moved the server) > 3737 default.
+  const discovered = portArg === undefined && env["DUET_PORT"] === undefined
+    ? readServedPort(env)?.port
+    : undefined;
+  const portRaw = portArg ?? env["DUET_PORT"] ?? discovered?.toString() ?? "3737";
   const port = Number(portRaw);
   if (!Number.isInteger(port) || port <= 0) {
     return { code: 1, stderr: "duet: --port requires a number" };
@@ -262,6 +322,24 @@ export interface BootstrapOptions {
   filePath: string;
   port?: number;
   openBrowser?: (url: string) => void;
+  /**
+   * When true, if `port` is already in use, retry on the next ports
+   * (`port+1`, `port+2`, …) until one is free. When false (default), a bind
+   * failure propagates — the caller asked for that exact port.
+   */
+  fallback?: boolean;
+}
+
+// How many consecutive ports to try before giving up when `fallback` is on.
+export const PORT_FALLBACK_ATTEMPTS = 20;
+
+// True for the synchronous error Bun.serve throws when the port is taken.
+function isAddrInUse(err: unknown): boolean {
+  const e = err as { code?: string; message?: string } | null;
+  return (
+    !!e &&
+    (e.code === "EADDRINUSE" || /address already in use|EADDRINUSE/i.test(e.message ?? ""))
+  );
 }
 
 export interface BootstrapHandle extends ServerHandle {
@@ -273,6 +351,7 @@ export function bootstrap({
   filePath,
   port = 3737,
   openBrowser,
+  fallback = false,
 }: BootstrapOptions): BootstrapHandle {
   ensureScene(filePath);
   const scene = JSON.parse(fs.readFileSync(filePath, "utf8"));
@@ -281,7 +360,30 @@ export function bootstrap({
   // records the bytes it writes for a browser save, and the watcher consumes
   // the matching hash so Duet's own write-back never bounces to the browser.
   const echoGuard = new EchoGuard();
-  const handle = createServer({ port, filePath, echoGuard });
+  // Bind the port. Without fallback, a taken port throws (caller wants that
+  // exact port). With fallback, walk to the next free port; Bun.serve throws
+  // synchronously on EADDRINUSE, so this is a plain loop.
+  let handle: ServerHandle;
+  if (!fallback) {
+    handle = createServer({ port, filePath, echoGuard });
+  } else {
+    let bound: ServerHandle | undefined;
+    for (let i = 0; i < PORT_FALLBACK_ATTEMPTS; i++) {
+      try {
+        bound = createServer({ port: port + i, filePath, echoGuard });
+        break;
+      } catch (err) {
+        if (isAddrInUse(err)) continue;
+        throw err;
+      }
+    }
+    if (!bound) {
+      throw new Error(
+        `duet: ports ${port}–${port + PORT_FALLBACK_ATTEMPTS - 1} are all in use`,
+      );
+    }
+    handle = bound;
+  }
   handle.setScene(scene);
 
   // Watch the served file: on each valid change, push it to all browser tabs.
@@ -361,6 +463,7 @@ if (import.meta.main) {
     }
 
     // Port precedence: --port flag > DUET_PORT env > 3737 default.
+    const explicit = portArg !== undefined || process.env.DUET_PORT !== undefined;
     const portRaw = portArg ?? process.env.DUET_PORT ?? "3737";
     const port = Number(portRaw);
     if (!Number.isInteger(port) || port <= 0) {
@@ -369,12 +472,54 @@ if (import.meta.main) {
     }
 
     // Long-running: bootstrap keeps the process alive (server + watcher).
-    bootstrap({
+    // Only the unspecified default falls back to a free port; an explicit port
+    // is a hard requirement, so a collision there fails loudly.
+    let handle: BootstrapHandle;
+    try {
+      handle = bootstrap({
+        filePath: filePath!,
+        port,
+        fallback: !explicit,
+        openBrowser: (url) => {
+          Bun.spawn(["open", url]);
+        },
+      });
+    } catch (err) {
+      if (isAddrInUse(err)) {
+        process.stderr.write(
+          `duet: port ${port} is already in use — stop the other server or pass a different --port\n`,
+        );
+      } else if (err instanceof Error && err.message.startsWith("duet:")) {
+        process.stderr.write(err.message + " — pass --port to pick one\n");
+      } else {
+        throw err;
+      }
+      process.exit(1);
+    }
+
+    const boundPort = handle.server.port ?? port;
+    process.stdout.write(
+      `Duet serving ${filePath} on http://localhost:${boundPort}` +
+        (boundPort !== port ? ` (${port} was busy)` : "") +
+        "\n",
+    );
+
+    // Record where we actually bound so `duet camera` (no --port) finds us even
+    // after a free-port fallback. Clean up on exit so the record never goes stale.
+    writeServedPort(process.env as Record<string, string | undefined>, {
+      port: boundPort,
       filePath: filePath!,
-      port,
-      openBrowser: (url) => {
-        Bun.spawn(["open", url]);
-      },
+      pid: process.pid,
+    });
+    const cleanup = () => clearServedPort(process.env as Record<string, string | undefined>);
+    process.on("exit", cleanup);
+    process.on("SIGINT", () => {
+      cleanup();
+      process.exit(0);
+    });
+    process.on("SIGTERM", () => {
+      cleanup();
+      process.exit(0);
     });
   } else if (argv[0] === "camera") {
     // Short-lived POST client — boots no server, no watcher.

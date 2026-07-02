@@ -2,7 +2,18 @@ import { describe, it, expect, afterEach } from "bun:test";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
-import { ensureScene, bootstrap, runCameraCommand, runNew, runLs, serveError, HELP } from "./cli";
+import {
+  ensureScene,
+  bootstrap,
+  runCameraCommand,
+  runNew,
+  runLs,
+  serveError,
+  HELP,
+  writeServedPort,
+  readServedPort,
+  clearServedPort,
+} from "./cli";
 import { createServer } from "./server";
 import { open } from "./open";
 
@@ -123,6 +134,35 @@ describe("bootstrap", () => {
 
     expect(openedUrls).toHaveLength(1);
     expect(openedUrls[0]).toBe(`http://localhost:${handle.server.port}/`);
+  });
+
+  it("falls back to a free port when the requested one is taken (fallback:true)", () => {
+    tmpDir = makeTmpDir();
+    const filePath = path.join(tmpDir, "fallback.excalidraw");
+
+    // Occupy a port, then ask bootstrap to bind that same port with fallback on.
+    const first = bootstrap({ filePath, port: 0, openBrowser: () => {} });
+    servers.push(first.server);
+    const taken = first.server.port!;
+
+    const second = bootstrap({ filePath, port: taken, fallback: true, openBrowser: () => {} });
+    servers.push(second.server);
+
+    expect(second.server.port).not.toBe(taken);
+    expect(second.getScene()).not.toBeNull();
+  });
+
+  it("throws on a taken port without fallback (default)", () => {
+    tmpDir = makeTmpDir();
+    const filePath = path.join(tmpDir, "taken.excalidraw");
+
+    const first = bootstrap({ filePath, port: 0, openBrowser: () => {} });
+    servers.push(first.server);
+    const taken = first.server.port!;
+
+    expect(() =>
+      bootstrap({ filePath, port: taken, openBrowser: () => {} }),
+    ).toThrow();
   });
 
   it("pushes an on-disk file change to a connected ws client (no click)", async () => {
@@ -753,5 +793,82 @@ describe("runCameraCommand", () => {
     // DUET_PORT env used when no --port flag
     const r2 = await runCameraCommand([], { DUET_PORT: String(p) });
     expect(r2.code).toBe(0);
+  });
+
+  it("resolves port from the discovery file when neither --port nor DUET_PORT is set", async () => {
+    const dir = makeFakeDistDir();
+    servers.push({ stop: () => fs.rmSync(dir, { recursive: true, force: true }) });
+    const srv = createServer({ port: 0, distDir: dir });
+    servers.push(srv.server);
+    srv.setScene({
+      type: "excalidraw", version: 2, elements: [{ id: "el1" }], appState: {}, files: {},
+    });
+    const p = srv.server.port!;
+
+    tmpDir = makeTmpDir();
+    const portFile = path.join(tmpDir, "duet-serve.json");
+    const env = { DUET_PORT_FILE: portFile };
+    writeServedPort(env, { port: p, filePath: "/whatever.excalidraw", pid: 1 });
+
+    // No --port, no DUET_PORT: camera should read the discovery file and reach p.
+    const result = await runCameraCommand([], env);
+    expect(result.code).toBe(0);
+    expect(result.stderr ?? "").not.toContain("localhost:3737");
+  });
+
+  it("lets --port override the discovery file", async () => {
+    const dir = makeFakeDistDir();
+    servers.push({ stop: () => fs.rmSync(dir, { recursive: true, force: true }) });
+    const srv = createServer({ port: 0, distDir: dir });
+    servers.push(srv.server);
+    srv.setScene({
+      type: "excalidraw", version: 2, elements: [{ id: "el1" }], appState: {}, files: {},
+    });
+    const p = srv.server.port!;
+
+    tmpDir = makeTmpDir();
+    const portFile = path.join(tmpDir, "duet-serve.json");
+    const env = { DUET_PORT_FILE: portFile };
+    // Discovery points at a dead port; --port must win and reach the live server.
+    writeServedPort(env, { port: 65000, filePath: "/x.excalidraw", pid: 1 });
+
+    const result = await runCameraCommand(["--port", String(p)], env);
+    expect(result.code).toBe(0);
+  });
+});
+
+describe("served-port discovery file", () => {
+  it("round-trips write → read and clears back to null", () => {
+    tmpDir = makeTmpDir();
+    const portFile = path.join(tmpDir, "duet-serve.json");
+    const env = { DUET_PORT_FILE: portFile };
+
+    expect(readServedPort(env)).toBeNull();
+
+    writeServedPort(env, { port: 3812, filePath: "/scene.excalidraw", pid: 4242 });
+    const rec = readServedPort(env);
+    expect(rec).not.toBeNull();
+    expect(rec!.port).toBe(3812);
+    expect(rec!.filePath).toBe("/scene.excalidraw");
+    expect(rec!.pid).toBe(4242);
+
+    clearServedPort(env);
+    expect(readServedPort(env)).toBeNull();
+  });
+
+  it("returns null for a malformed discovery file", () => {
+    tmpDir = makeTmpDir();
+    const portFile = path.join(tmpDir, "duet-serve.json");
+    fs.writeFileSync(portFile, "{ not valid json", "utf8");
+
+    expect(readServedPort({ DUET_PORT_FILE: portFile })).toBeNull();
+  });
+
+  it("returns null when the record has no usable port", () => {
+    tmpDir = makeTmpDir();
+    const portFile = path.join(tmpDir, "duet-serve.json");
+    fs.writeFileSync(portFile, JSON.stringify({ filePath: "/x", pid: 1 }), "utf8");
+
+    expect(readServedPort({ DUET_PORT_FILE: portFile })).toBeNull();
   });
 });
