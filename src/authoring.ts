@@ -140,9 +140,15 @@ export function makeVerbs(els: El[], opts: { dark?: boolean } = {}): Verbs {
   // geometry.ts uses the same factor at check time for label-overflow detection.
   const w = (t: string, fs: number) => t.length * fs * 0.55;
 
-  // Standalone text element
-  const text = (id: string, x: number, y: number, t: string, fontSize: number, color = ink) =>
-    els.push(baseText({ id, x, y, width: w(t, fontSize), height: fontSize * 1.25, text: t, fontSize, strokeColor: color }));
+  // Standalone text element. Measure per line so multiline text (explicit "\n")
+  // gets a box tall enough for every line and wide enough for its widest line.
+  // A single-line height here left later lines clipped until a manual remeasure
+  // (same class of bug as #25, but for standalone text rather than bound labels).
+  const text = (id: string, x: number, y: number, t: string, fontSize: number, color = ink) => {
+    const width = Math.max(...t.split("\n").map((line) => w(line, fontSize)));
+    const height = measuredTextHeight(t, fontSize);
+    els.push(baseText({ id, x, y, width, height, text: t, fontSize, strokeColor: color }));
+  };
 
   // Rectangle with a bound-text label. Two elements: rect + text with containerId.
   const labeledRect = (

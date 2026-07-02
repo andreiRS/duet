@@ -120,6 +120,27 @@ describe("authored text uses the handdrawn Excalifont family", () => {
     const textEl = s.build().elements.find((e) => e.id === "t1");
     expect(textEl!.fontFamily).toBe(5);
   });
+
+  test("multiline standalone text is tall enough for every line", () => {
+    // Regression: a single-line height clipped later lines until a manual
+    // remeasure. Height must cover all lines (lines × fontSize × lineHeight).
+    const fontSize = 14;
+    const s = scene();
+    s.text("t1", 0, 0, "line one\nline two\nline three", fontSize);
+    const textEl = s.build().elements.find((e) => e.id === "t1")!;
+    expect(textEl.height).toBeCloseTo(3 * fontSize * 1.25);
+  });
+
+  test("multiline standalone text width is the widest line, not the sum", () => {
+    const fontSize = 14;
+    const short = "hi";
+    const long = "a much longer line";
+    const s = scene();
+    s.text("t1", 0, 0, `${short}\n${long}`, fontSize);
+    const textEl = s.build().elements.find((e) => e.id === "t1")!;
+    // Widest line only — a summed-length width would be far larger.
+    expect(textEl.width).toBeCloseTo(long.length * fontSize * 0.55);
+  });
 });
 
 // AC1: build() returns valid Excalidraw JSON with required fields
